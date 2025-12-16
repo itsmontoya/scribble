@@ -1,5 +1,9 @@
 pub mod ctx;
+pub mod json_array_encoder;
 pub mod logging;
+pub mod output_type;
+pub mod segment_encoder;
 pub mod segments;
 pub mod vad;
+pub mod vtt_encoder;
 pub mod wav;
