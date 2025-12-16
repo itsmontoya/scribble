@@ -8,7 +8,6 @@ pub struct VttEncoder<W: Write> {
     w: W,
     started: bool,
     closed: bool,
-    idx: u32,
 }
 
 impl<W: Write> VttEncoder<W> {
@@ -17,7 +16,6 @@ impl<W: Write> VttEncoder<W> {
             w,
             started: false,
             closed: false,
-            idx: 1,
         }
     }
 
@@ -41,11 +39,9 @@ impl<W: Write> SegmentEncoder for VttEncoder<W> {
         let start = get_formatted_timestamp(seg.start_seconds);
         let end = get_formatted_timestamp(seg.end_seconds);
 
-        writeln!(&mut self.w, "{}", self.idx)?;
         writeln!(&mut self.w, "{} --> {}", start, end)?;
         writeln!(&mut self.w, "{}", seg.text)?;
         writeln!(&mut self.w)?;
-        self.idx += 1;
 
         Ok(())
     }
