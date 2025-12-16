@@ -1,3 +1,4 @@
+use crate::segment_encoder::SegmentEncoder;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperSegment, WhisperState};
@@ -10,15 +11,19 @@ pub struct Segment {
     pub language_code: String,
 }
 
-pub fn get_segments(ctx: &WhisperContext, samples: &mut [f32]) -> Result<Vec<Segment>> {
+pub fn write_segments(
+    ctx: &WhisperContext,
+    e: &mut dyn SegmentEncoder,
+    samples: &mut [f32],
+) -> Result<()> {
     let state = process(ctx, samples)?;
-    let mut segments: Vec<Segment> = Vec::new();
     for segment in state.as_iter() {
         let s = get_segment(segment)?;
-        segments.push(s);
+        e.write_segment(&s)?;
     }
 
-    Ok(segments)
+    e.close()?;
+    Ok(())
 }
 
 pub fn get_segment(segment: WhisperSegment) -> Result<Segment> {
