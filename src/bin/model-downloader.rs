@@ -1,6 +1,6 @@
-// src/bin/model-downloader.rs
-//
-// A small CLI utility to download known Whisper (ASR) and Whisper-VAD models into a target dir.
+// A small CLI utility to download known Whisper (ASR) and Whisper-VAD models
+// into a target directory.
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -18,10 +18,12 @@ struct Args {
     list: bool,
 
     /// Model name (examples: tiny, base.en, large-v3-turbo, silero-v6.2.0)
-    #[arg(long)]
+    ///
+    /// We intentionally keep an allowlist of known-good model artifacts.
+    #[arg(long, required_unless_present = "list")]
     name: Option<String>,
 
-    /// Target directory to store models (created if missing)
+    /// Target directory to store models (created if missing).
     #[arg(long, default_value = "./models")]
     dir: PathBuf,
 }
@@ -35,18 +37,24 @@ enum ModelKind {
 /// Download source for a known model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ModelSpec {
+    /// Whether this is a Whisper ASR model or a VAD model.
     kind: ModelKind,
-    /// Friendly model name the user types (e.g. "large-v3-turbo", "silero-v6.2.0").
+
+    /// Friendly name users type (e.g. "large-v3-turbo").
     name: &'static str,
-    /// Exact filename written to disk (e.g. "ggml-large-v3-turbo.bin").
+
+    /// Filename written to disk (e.g. "ggml-large-v3-turbo.bin").
     filename: &'static str,
+
     /// Full download URL.
     url: &'static str,
 }
 
-// Whisper models (allowlist).
+// -----------------------------------------------------------------------------
+// Whisper models (allowlist)
 //
 // These URLs match whisper.cpp’s standard Hugging Face repo for GGML models.
+// -----------------------------------------------------------------------------
 static WHISPER_MODELS: &[ModelSpec] = &[
     // tiny
     ModelSpec {
@@ -172,7 +180,7 @@ static WHISPER_MODELS: &[ModelSpec] = &[
         filename: "ggml-medium-q8_0.bin",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q8_0.bin",
     },
-    // large v1/v2/v3
+    // large
     ModelSpec {
         kind: ModelKind::Whisper,
         name: "large-v1",
@@ -209,7 +217,7 @@ static WHISPER_MODELS: &[ModelSpec] = &[
         filename: "ggml-large-v3-q5_0.bin",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
     },
-    // turbo variants
+    // turbo
     ModelSpec {
         kind: ModelKind::Whisper,
         name: "large-v3-turbo",
@@ -230,7 +238,9 @@ static WHISPER_MODELS: &[ModelSpec] = &[
     },
 ];
 
-// VAD models (allowlist).
+// -----------------------------------------------------------------------------
+// VAD models (allowlist)
+// -----------------------------------------------------------------------------
 static VAD_MODELS: &[ModelSpec] = &[
     ModelSpec {
         kind: ModelKind::Vad,
@@ -254,10 +264,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let name = args
-        .name
-        .as_deref()
-        .context("missing --name (or use --list)")?;
+    let name = args.name.as_deref().expect("clap should require --name");
 
     fs::create_dir_all(&args.dir)
         .with_context(|| format!("failed to create target dir: {}", args.dir.display()))?;
@@ -283,7 +290,12 @@ fn main() -> Result<()> {
     );
     println!("    {}", spec.url);
 
-    download_to_path(spec.url, &dest_path)?;
+    let client = Client::builder()
+        .user_agent("scribble-model-downloader")
+        .build()
+        .context("failed to build HTTP client")?;
+
+    download_to_path(&client, spec.url, &dest_path)?;
 
     println!("✅ saved: {}", dest_path.display());
     Ok(())
@@ -311,9 +323,7 @@ fn print_model_list() {
 /// Download a URL into `dest_path` safely:
 /// - download to `dest_path.part`
 /// - fsync + rename to final path
-fn download_to_path(url: &str, dest_path: &Path) -> Result<()> {
-    let client = Client::new();
-
+fn download_to_path(client: &Client, url: &str, dest_path: &Path) -> Result<()> {
     let mut resp = client
         .get(url)
         .send()
@@ -337,25 +347,35 @@ fn download_to_path(url: &str, dest_path: &Path) -> Result<()> {
         .progress_chars("#>-"),
     );
 
-    let tmp_path = dest_path.with_extension("part");
-    let mut file = fs::File::create(&tmp_path)
-        .with_context(|| format!("failed to create temp file: {}", tmp_path.display()))?;
+    let tmp_path = PathBuf::from(format!("{}.part", dest_path.display()));
 
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = resp.read(&mut buf)?;
-        if n == 0 {
-            break;
+    let result = (|| -> Result<()> {
+        let mut file = fs::File::create(&tmp_path)
+            .with_context(|| format!("failed to create temp file: {}", tmp_path.display()))?;
+
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = resp.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n])?;
+            pb.inc(n as u64);
         }
-        file.write_all(&buf[..n])?;
-        pb.inc(n as u64);
+
+        file.sync_all()?;
+        pb.finish_and_clear();
+
+        fs::rename(&tmp_path, dest_path)
+            .with_context(|| format!("failed to move into place: {}", dest_path.display()))?;
+
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+        pb.finish_and_clear();
     }
 
-    file.sync_all()?;
-    pb.finish_and_clear();
-
-    fs::rename(&tmp_path, dest_path)
-        .with_context(|| format!("failed to move into place: {}", dest_path.display()))?;
-
-    Ok(())
+    result
 }
