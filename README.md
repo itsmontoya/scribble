@@ -13,7 +13,7 @@ Scribble is a fast, lightweight transcription engine written in Rust, built on t
 
 ## TODOs
 
-- Add unit tests
+- Expand testing (goal of 80%+ test coverage)
 - Implement the webserver
 - Streaming / incremental transcription support
 
