@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use hound::{WavReader, WavSpec};
+use std::io::{Read, Seek};
 
-/// Load a WAV file from disk and return normalized audio samples.
+/// Load WAV audio from a reader and return normalized audio samples.
 ///
 /// What we return:
 /// - A `Vec<f32>` containing mono audio samples normalized to `[-1.0, 1.0]`
@@ -14,11 +15,12 @@ use hound::{WavReader, WavSpec};
 /// Why we enforce this:
 /// - whisper.cpp is tuned specifically for 16 kHz mono audio
 /// - enforcing constraints here keeps the rest of the pipeline simple and predictable
-pub fn get_samples_from_wav(audio_path: &str) -> Result<(Vec<f32>, WavSpec)> {
-    // Open the WAV file and attach useful context if it fails.
-    let mut reader = WavReader::open(audio_path)
-        .with_context(|| format!("failed to open WAV file: {audio_path}"))?;
-
+pub fn get_samples_from_wav_reader<R>(reader: R) -> Result<(Vec<f32>, WavSpec)>
+where
+    R: Read + Seek,
+{
+    // Create a WAV reader from the provided input.
+    let mut reader = WavReader::new(reader).context("failed to read WAV data from reader")?;
     let spec = reader.spec();
 
     // We require mono audio.
