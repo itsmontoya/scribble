@@ -2,6 +2,8 @@
 
 Scribble is a fast, lightweight transcription engine written in Rust, built on top of Whisper and designed for both CLI and webserver use.
 
+![billboard](https://github.com/itsmontoya/scribble/blob/main/banner.png?raw=true "Scribble billboard")
+
 ## Goals
 
 - Provide a clean, idiomatic Rust API for audio transcription
