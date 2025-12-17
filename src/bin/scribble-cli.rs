@@ -1,52 +1,59 @@
 use anyhow::Result;
 use clap::Parser;
+use std::fs::File;
+use std::io;
 
-use std::io::{self, BufWriter};
-
-use scribble::ctx::get_context;
-use scribble::json_array_encoder::JsonArrayEncoder;
-use scribble::logging::init_whisper_logging;
+use scribble::opts::Opts;
 use scribble::output_type::OutputType;
-use scribble::segment_encoder::SegmentEncoder;
-use scribble::segments::write_segments;
-use scribble::vad::apply_vad;
-use scribble::vtt_encoder::VttEncoder;
-use scribble::wav::get_samples_from_wav;
+use scribble::scribble::Scribble;
 
 fn main() -> Result<()> {
-    init_whisper_logging();
-    let params = get_params()?;
-    let ctx = get_context(&params.model_path)?;
-    let (mut samples, spec) = get_samples_from_wav(&params.audio_path)?;
-    if !apply_vad(&params.vad_model_path, &spec, &mut samples)? {
-        return Ok(());
-    }
+    let params = Params::parse();
 
-    let stdout = io::stdout();
-    let writer = BufWriter::new(stdout.lock());
+    // Map CLI flags into library options.
+    // This keeps the library reusable and the CLI thin.
+    let opts = Opts {
+        enable_translate_to_english: params.enable_translation_to_english,
+        enable_voice_activity_detection: params.enable_voice_activity_detection,
 
-    let mut encoder: Box<dyn SegmentEncoder> = match params.output_type {
-        OutputType::Json => Box::new(JsonArrayEncoder::new(writer)),
-        OutputType::Vtt => Box::new(VttEncoder::new(writer)),
+        // If this is `None`, we allow Whisper to auto-detect language.
+        language: params.language,
+
+        output_type: params.output_type,
     };
 
-    write_segments(&ctx, &mut *encoder, &mut samples)?;
+    // Load the Whisper model (expensive) and prepare for transcription.
+    let scribble = Scribble::new(params.model_path, params.vad_model_path)?;
+
+    // `File` implements `Read + Seek`, which our WAV reader requires.
+    let input = File::open(&params.audio_path)?;
+
+    // Stream transcription output directly to stdout.
+    scribble.transcribe(input, io::stdout(), &opts)?;
+
     Ok(())
 }
 
+/// CLI parameters for `scribble`.
+///
+/// We keep these flags explicit and well-documented so usage is self-explanatory.
 #[derive(Parser, Debug)]
 #[command(name = "scribble")]
 #[command(about = "A transcription CLI")]
 struct Params {
+    /// Path to a whisper.cpp model file (e.g. `ggml-base.en.bin`).
     #[arg(short = 'm', long = "model")]
     pub model_path: String,
 
+    /// Path to a Whisper VAD model file.
     #[arg(short = 'v', long = "vad-model")]
     pub vad_model_path: String,
 
+    /// Path to a mono 16kHz WAV file to transcribe.
     #[arg(short = 'a', long = "audio")]
     pub audio_path: String,
 
+    /// Output format for transcription segments.
     #[arg(
         short = 'o',
         long = "output-type",
@@ -55,17 +62,19 @@ struct Params {
     )]
     pub output_type: OutputType,
 
+    /// Enable voice activity detection (VAD) to suppress non-speech regions.
     #[arg(long = "enable-vad", default_value_t = false)]
     pub enable_voice_activity_detection: bool,
 
+    /// Translate speech to English (not wired into the transcription pipeline yet).
     #[arg(
         short = 't',
         long = "enable-translation-to-english",
         default_value_t = false
     )]
     pub enable_translation_to_english: bool,
-}
 
-fn get_params() -> Result<Params> {
-    Ok(Params::parse())
+    /// Optional language hint (e.g. "en", "es"). If omitted, Whisper will auto-detect.
+    #[arg(short = 'l', long = "language")]
+    pub language: Option<String>,
 }
