@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     };
 
     // Load the Whisper model (expensive) and prepare for transcription.
-    let scribble = Scribble::new(params.model_path, params.vad_model_path)?;
+    let mut scribble = Scribble::new(params.model_path, params.vad_model_path)?;
 
     // `File` implements `Read + Seek`, which our WAV reader requires.
     let input = File::open(&params.audio_path)?;
@@ -42,15 +42,15 @@ fn main() -> Result<()> {
 #[command(about = "A transcription CLI")]
 struct Params {
     /// Path to a whisper.cpp model file (e.g. `ggml-base.en.bin`).
-    #[arg(short = 'm', long = "model")]
+    #[arg(short = 'm', long = "model", required = true)]
     pub model_path: String,
 
     /// Path to a Whisper VAD model file.
-    #[arg(short = 'v', long = "vad-model")]
+    #[arg(short = 'v', long = "vad-model", required = true)]
     pub vad_model_path: String,
 
     /// Path to a mono 16kHz WAV file to transcribe.
-    #[arg(short = 'a', long = "audio")]
+    #[arg(short = 'a', long = "audio", required = true)]
     pub audio_path: String,
 
     /// Output format for transcription segments.
