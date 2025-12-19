@@ -92,7 +92,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
-      - name: Commit + open PR (no direct push to main)
+      - name: Commit + open PR (unique branch name; no direct push to main)
         if: steps.decide.outputs.do_release == 'true'
         shell: bash
         env:
@@ -109,19 +109,23 @@ jobs:
             exit 0
           fi
 
-          branch="chore/release-${{ steps.version.outputs.tag }}"
+          tag="${{ steps.version.outputs.tag }}"
+          pr_number="${{ github.event.pull_request.number }}"
+          run_id="${{ github.run_id }}"
+
+          # Unique branch name prevents non-fast-forward collisions on reruns
+          branch="chore/release-${tag}-pr${pr_number}-run${run_id}"
 
           git checkout -b "$branch"
           git add Cargo.toml Cargo.lock || true
-
-          git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
+          git commit -m "chore(release): ${tag}"
           git push -u origin "$branch"
 
           pr_url="$(gh pr create \
             --base main \
             --head "$branch" \
-            --title "chore(release): ${{ steps.version.outputs.tag }}" \
-            --body "Automated version bump for ${{ steps.version.outputs.tag }}.")"
+            --title "chore(release): ${tag}" \
+            --body "Automated version bump for ${tag} (from PR #${pr_number}).")"
 
           echo "Opened bump PR: $pr_url"
 
