@@ -1,0 +1,226 @@
+name: Publish Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release-main
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect release bump
+    runs-on: ubuntu-latest
+    outputs:
+      do_release: ${{ steps.detect.outputs.do_release }}
+      version: ${{ steps.detect.outputs.version }}
+      tag: ${{ steps.detect.outputs.tag }}
+
+    steps:
+      - name: Detect bump commit in push payload
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json, os, re
+
+          event_path = os.environ["GITHUB_EVENT_PATH"]
+          with open(event_path, "r", encoding="utf-8") as f:
+              ev = json.load(f)
+
+          commits = ev.get("commits", [])
+          pat = re.compile(r"^chore\(release\): v(\d+\.\d+\.\d+)\b")
+
+          for c in commits:
+              msg = (c.get("message") or "").strip()
+              m = pat.match(msg)
+              if m:
+                  v = m.group(1)
+                  print(f"do_release=true")
+                  print(f"version={v}")
+                  print(f"tag=v{v}")
+                  break
+          else:
+              print("do_release=false")
+          PY >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        if: steps.detect.outputs.do_release == 'true'
+        run: |
+          echo "Release detected: ${{ steps.detect.outputs.tag }}"
+
+  tag_and_release:
+    name: Tag + create draft release
+    needs: detect
+    if: needs.detect.outputs.do_release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ needs.detect.outputs.tag }}
+      version: ${{ needs.detect.outputs.version }}
+
+    steps:
+      - name: Checkout main (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create + push tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${{ needs.detect.outputs.tag }}"
+
+          # Create tag if missing (rerun-safe)
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists locally."
+          else
+            git tag "$tag"
+          fi
+
+          # Push tag (remote may already have it on rerun)
+          git push origin "$tag" || echo "Tag push failed (maybe already exists). Continuing."
+
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.detect.outputs.tag }}
+          name: ${{ needs.detect.outputs.tag }}
+          draft: true
+          generate_release_notes: true
+
+  build:
+    name: Build binaries (${{ matrix.os }})
+    needs: tag_and_release
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag_and_release.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build all bins
+        run: cargo build --release --bins
+
+      - name: Collect binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          version="${{ needs.tag_and_release.outputs.version }}"
+          os="${{ runner.os }}"
+
+          if [ "$os" = "Windows" ]; then
+            arch="${PROCESSOR_ARCHITECTURE:-unknown}"
+            pattern="target/release/*.exe"
+          else
+            arch="$(uname -m)"
+            pattern="target/release/*"
+          fi
+
+          for bin in $pattern; do
+            [ -f "$bin" ] || continue
+            name="$(basename "$bin")"
+
+            # Avoid uploading non-binary files on unix (best-effort: only executable files)
+            if [ "$os" != "Windows" ]; then
+              [ -x "$bin" ] || continue
+            fi
+
+            cp "$bin" "dist/${name}-v${version}-${os}-${arch}"
+          done
+
+      - name: Generate SHA256 checksums (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          shasum -a 256 * > SHA256SUMS.txt
+
+      - name: Generate SHA256 checksums (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $files = Get-ChildItem -Path dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" }
+          $lines = foreach ($f in $files) {
+            $h = Get-FileHash -Algorithm SHA256 $f.FullName
+            "$($h.Hash.ToLower()) $($f.Name)"
+          }
+          $lines | Set-Content -NoNewline -Path dist/SHA256SUMS.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag_and_release.outputs.tag }}
+          files: dist/*
+
+  publish:
+    name: Publish to crates.io
+    needs:
+      - tag_and_release
+      - build
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag_and_release.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish (skip if token missing)
+        if: env.CARGO_REGISTRY_TOKEN != ''
+        run: cargo publish
+
+      - name: Note (token missing)
+        if: env.CARGO_REGISTRY_TOKEN == ''
+        run: echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish."
+
+  finalize:
+    name: Finalize release
+    needs:
+      - tag_and_release
+      - publish
+    if: needs.publish.result == 'success' || needs.publish.result == 'skipped'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ needs.tag_and_release.outputs.tag }}" --draft=false
