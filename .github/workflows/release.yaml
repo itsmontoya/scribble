@@ -1,4 +1,4 @@
-name: Release
+name: Release (open bump PR)
 
 on:
   pull_request:
@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
   issues: read
 
 concurrency:
@@ -15,15 +16,9 @@ concurrency:
 
 jobs:
   prepare:
-    name: Prepare release
+    name: Prepare release bump PR
     if: ${{ github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
-
-    outputs:
-      do_release: ${{ steps.decide.outputs.do_release }}
-      bump: ${{ steps.decide.outputs.bump }}
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout (full history)
@@ -66,6 +61,10 @@ jobs:
           echo "do_release=true" >> "$GITHUB_OUTPUT"
           echo "bump=$bump" >> "$GITHUB_OUTPUT"
 
+      - name: Stop (no label)
+        if: steps.decide.outputs.do_release != 'true'
+        run: echo "No major/minor/patch label found; skipping."
+
       - name: Install Rust
         if: steps.decide.outputs.do_release == 'true'
         uses: dtolnay/rust-toolchain@stable
@@ -87,154 +86,44 @@ jobs:
         if: steps.decide.outputs.do_release == 'true'
         shell: bash
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 \
-            | python -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+          set -euo pipefail
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
-      - name: Commit + tag
+      - name: Commit + open PR (no direct push to main)
         if: steps.decide.outputs.do_release == 'true'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add Cargo.toml Cargo.lock || true
-          git commit -m "chore(release): v${{ steps.version.outputs.version }}" || true
-
-          git tag "${{ steps.version.outputs.tag }}"
-          git push origin HEAD:main
-          git push origin "${{ steps.version.outputs.tag }}"
-
-      - name: Create draft GitHub release
-        if: steps.decide.outputs.do_release == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ steps.version.outputs.tag }}
-          draft: true
-          generate_release_notes: true
-
-  build:
-    name: Build binaries (${{ matrix.os }})
-    needs: prepare
-    if: needs.prepare.outputs.do_release == 'true'
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
-    steps:
-      - name: Checkout tag
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build all bins
-        run: cargo build --release --bins
-
-      - name: Collect binaries
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p dist
-          version="${{ needs.prepare.outputs.version }}"
-          os="${{ runner.os }}"
-
-          if [ "$os" = "Windows" ]; then
-            arch="${PROCESSOR_ARCHITECTURE:-unknown}"
-            pattern="target/release/*.exe"
-          else
-            arch="$(uname -m)"
-            pattern="target/release/*"
+          # Safety: if there are no changes, bail.
+          if git diff --quiet; then
+            echo "No version changes detected after bump; exiting."
+            exit 0
           fi
 
-          for bin in $pattern; do
-            [ -f "$bin" ] || continue
-            name="$(basename "$bin")"
+          branch="chore/release-${{ steps.version.outputs.tag }}"
 
-            # Avoid uploading non-binary files on unix (best-effort: only executable files)
-            if [ "$os" != "Windows" ]; then
-              [ -x "$bin" ] || continue
-            fi
+          git checkout -b "$branch"
+          git add Cargo.toml Cargo.lock || true
 
-            cp "$bin" "dist/${name}-v${version}-${os}-${arch}"
-          done
+          git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
+          git push -u origin "$branch"
 
-      - name: Generate SHA256 checksums (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd dist
-          shasum -a 256 * > SHA256SUMS.txt
+          pr_url="$(gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore(release): ${{ steps.version.outputs.tag }}" \
+            --body "Automated version bump for ${{ steps.version.outputs.tag }}.")"
 
-      - name: Generate SHA256 checksums (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $files = Get-ChildItem -Path dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" }
-          $lines = foreach ($f in $files) {
-            $h = Get-FileHash -Algorithm SHA256 $f.FullName
-            "$($h.Hash.ToLower()) $($f.Name)"
-          }
-          $lines | Set-Content -NoNewline -Path dist/SHA256SUMS.txt
+          echo "Opened bump PR: $pr_url"
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          files: dist/*
-
-  publish:
-    name: Publish to crates.io
-    needs: [prepare, build]
-    if: needs.prepare.outputs.do_release == 'true'
-    runs-on: ubuntu-latest
-
-    env:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-    steps:
-      - name: Checkout tag
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Publish (skip if token missing)
-        if: env.CARGO_REGISTRY_TOKEN != ''
-        run: cargo publish
-
-      - name: Note (token missing)
-        if: env.CARGO_REGISTRY_TOKEN == ''
-        run: echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish."
-
-  finalize:
-    name: Finalize release
-    needs: [prepare, publish]
-    if: needs.prepare.outputs.do_release == 'true' && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Publish draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ needs.prepare.outputs.tag }}" --draft=false
+          # Best-effort: enable auto-merge (will fail if not enabled in repo settings)
+          gh pr merge --auto --merge "$pr_url" || true
