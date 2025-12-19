@@ -1,0 +1,198 @@
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release
+    if: ${{ github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+
+    outputs:
+      do_release: ${{ steps.decide.outputs.do_release }}
+      bump: ${{ steps.decide.outputs.bump }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide bump from PR labels
+        id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          labels='${{ toJson(github.event.pull_request.labels) }}'
+
+          bump=""
+          echo "$labels" | grep -q '"name":"major"' && bump="major"
+          echo "$labels" | grep -q '"name":"minor"' && bump="${bump:-minor}"
+          echo "$labels" | grep -q '"name":"patch"' && bump="${bump:-patch}"
+
+          if [ -z "$bump" ]; then
+            echo "No version label found; skipping release."
+            echo "do_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "do_release=true" >> "$GITHUB_OUTPUT"
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        if: steps.decide.outputs.do_release == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        if: steps.decide.outputs.do_release == 'true'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-edit
+        if: steps.decide.outputs.do_release == 'true'
+        run: cargo install cargo-edit --locked
+
+      - name: Bump version
+        if: steps.decide.outputs.do_release == 'true'
+        run: cargo set-version --bump ${{ steps.decide.outputs.bump }}
+
+      - name: Read version
+        id: version
+        if: steps.decide.outputs.do_release == 'true'
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit + tag
+        if: steps.decide.outputs.do_release == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add Cargo.toml Cargo.lock || true
+          git commit -m "chore(release): v${{ steps.version.outputs.version }}" || true
+
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create draft release
+        if: steps.decide.outputs.do_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          draft: true
+          generate_release_notes: true
+
+  build:
+    name: Build binaries (${{ matrix.os }})
+    needs: prepare
+    if: needs.prepare.outputs.do_release == 'true'
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build all bins
+        run: cargo build --release --bins
+
+      - name: Collect binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          version="${{ needs.prepare.outputs.version }}"
+          os="${{ runner.os }}"
+
+          ext=""
+          [ "$os" = "Windows" ] && ext=".exe"
+
+          for bin in target/release/*${ext}; do
+            [ -f "$bin" ] || continue
+            name=$(basename "$bin")
+            cp "$bin" "dist/${name}-v${version}-${os}${ext}"
+          done
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          cd dist
+          if command -v shasum >/dev/null; then
+            shasum -a 256 * > SHA256SUMS.txt
+          else
+            certutil -hashfile * SHA256 > SHA256SUMS.txt
+          fi
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          files: dist/*
+
+  publish:
+    name: Publish to crates.io
+    needs: [prepare, build]
+    if: needs.prepare.outputs.do_release == 'true' && secrets.CARGO_REGISTRY_TOKEN != ''
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
+
+  finalize:
+    name: Finalize release
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.do_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ needs.prepare.outputs.tag }}" --draft=false
