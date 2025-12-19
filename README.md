@@ -170,6 +170,7 @@ println!("{json}");
 ## TODOs
 
 - Expand testing (goal of 80%+ test coverage)
+- Update VAD to utilize streaming approach
 - Implement the webserver
 - Streaming / incremental transcription support
 
