@@ -31,10 +31,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Extract commit messages included in this push (merge commit + PR commits)
           msgs="$(jq -r '.commits[].message // empty' "$GITHUB_EVENT_PATH" || true)"
 
-          # Find first message like: chore(release): vX.Y.Z
           version="$(
             printf "%s\n" "$msgs" \
               | sed -nE 's/^chore\(release\): v([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p' \
@@ -71,7 +69,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           tag="${{ needs.detect.outputs.tag }}"
 
           if git rev-parse "$tag" >/dev/null 2>&1; then
@@ -101,7 +98,6 @@ jobs:
         os:
           - ubuntu-latest
           - macos-latest
-          - windows-latest
 
     steps:
       - name: Checkout tag
@@ -114,6 +110,24 @@ jobs:
 
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
+
+      # macOS: whisper-rs-sys/ggml uses CMake; ensure tools exist.
+      - name: Install build deps (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew update
+          brew install cmake ninja pkg-config
+
+      # Fix: ggml is compiling with "noi8mm" and then hitting vmmlaq_s32 which requires i8mm.
+      # Force i8mm on for the C/C++ compilation flags passed to CMake.
+      - name: Configure CMake flags (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CMAKE_ARGS=-DCMAKE_C_FLAGS=-mcpu=native+dotprod+i8mm -DCMAKE_CXX_FLAGS=-mcpu=native+dotprod+i8mm" >> "$GITHUB_ENV"
 
       - name: Build all bins
         run: cargo build --release --bins
@@ -148,24 +162,11 @@ jobs:
           done
 
       - name: Generate SHA256 checksums (Linux/macOS)
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
           cd dist
           shasum -a 256 * > SHA256SUMS.txt
-
-      - name: Generate SHA256 checksums (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $files = Get-ChildItem -Path dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" }
-          $lines = foreach ($f in $files) {
-            $h = Get-FileHash -Algorithm SHA256 $f.FullName
-            "$($h.Hash.ToLower()) $($f.Name)"
-          }
-          $lines | Set-Content -NoNewline -Path dist/SHA256SUMS.txt
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
