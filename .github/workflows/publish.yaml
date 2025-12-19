@@ -1,4 +1,4 @@
-name: Publish
+name: Publish (linux only)
 
 on:
   push:
@@ -88,16 +88,9 @@ jobs:
           generate_release_notes: true
 
   build:
-    name: Build binaries (${{ matrix.os }})
+    name: Build binaries (linux)
     needs: tag_and_release
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout tag
@@ -111,24 +104,6 @@ jobs:
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
 
-      # macOS: whisper-rs-sys/ggml uses CMake; ensure tools exist.
-      - name: Install build deps (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          brew update
-          brew install cmake ninja pkg-config
-
-      # Fix: ggml is compiling with "noi8mm" and then hitting vmmlaq_s32 which requires i8mm.
-      # Force i8mm on for the C/C++ compilation flags passed to CMake.
-      - name: Configure CMake flags (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "CMAKE_ARGS=-DCMAKE_C_FLAGS=-mcpu=native+dotprod+i8mm -DCMAKE_CXX_FLAGS=-mcpu=native+dotprod+i8mm" >> "$GITHUB_ENV"
-
       - name: Build all bins
         run: cargo build --release --bins
 
@@ -140,33 +115,24 @@ jobs:
           mkdir -p dist
           version="${{ needs.tag_and_release.outputs.version }}"
           os="${{ runner.os }}"
+          arch="$(uname -m)"
 
-          if [ "$os" = "Windows" ]; then
-            arch="${PROCESSOR_ARCHITECTURE:-unknown}"
-            pattern="target/release/*.exe"
-          else
-            arch="$(uname -m)"
-            pattern="target/release/*"
-          fi
-
-          for bin in $pattern; do
+          for bin in target/release/*; do
             [ -f "$bin" ] || continue
             name="$(basename "$bin")"
 
-            # Best-effort: only upload executable files on unix
-            if [ "$os" != "Windows" ]; then
-              [ -x "$bin" ] || continue
-            fi
+            # best-effort: only upload executable files
+            [ -x "$bin" ] || continue
 
             cp "$bin" "dist/${name}-v${version}-${os}-${arch}"
           done
 
-      - name: Generate SHA256 checksums (Linux/macOS)
+      - name: Generate SHA256 checksums
         shell: bash
         run: |
           set -euo pipefail
           cd dist
-          shasum -a 256 * > SHA256SUMS.txt
+          sha256sum * > SHA256SUMS.txt
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
