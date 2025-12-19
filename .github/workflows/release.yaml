@@ -82,6 +82,8 @@ jobs:
         if: steps.decide.outputs.do_release == 'true'
         shell: bash
         run: |
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
@@ -96,8 +98,8 @@ jobs:
         if: steps.decide.outputs.do_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           draft: true
           generate_release_notes: true
 
@@ -136,24 +138,39 @@ jobs:
           version="${{ needs.prepare.outputs.version }}"
           os="${{ runner.os }}"
 
-          ext=""
-          [ "$os" = "Windows" ] && ext=".exe"
+          # Filter for Windows .exe, otherwise take all regular files in target/release
+          if [ "$os" = "Windows" ]; then
+            pattern="target/release/*.exe"
+          else
+            pattern="target/release/*"
+          fi
 
-          for bin in target/release/*${ext}; do
+          for bin in $pattern; do
             [ -f "$bin" ] || continue
             name=$(basename "$bin")
-            cp "$bin" "dist/${name}-v${version}-${os}${ext}"
+            # name already includes .exe on Windows
+            cp "$bin" "dist/${name}-v${version}-${os}"
           done
 
-      - name: Generate SHA256 checksums
+      - name: Generate SHA256 checksums (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
+          set -euo pipefail
           cd dist
-          if command -v shasum >/dev/null; then
-            shasum -a 256 * > SHA256SUMS.txt
-          else
-            certutil -hashfile * SHA256 > SHA256SUMS.txt
-          fi
+          shasum -a 256 * > SHA256SUMS.txt
+
+      - name: Generate SHA256 checksums (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $files = Get-ChildItem -Path dist -File
+          $lines = foreach ($f in $files) {
+            $h = Get-FileHash -Algorithm SHA256 $f.FullName
+            "$($h.Hash.ToLower())  $($f.Name)"
+          }
+          $lines | Out-File -FilePath "dist/SHA256SUMS.txt" -Encoding ascii
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
@@ -164,8 +181,11 @@ jobs:
   publish:
     name: Publish to crates.io
     needs: [prepare, build]
-    if: needs.prepare.outputs.do_release == 'true' && secrets.CARGO_REGISTRY_TOKEN != ''
+    if: needs.prepare.outputs.do_release == 'true'
     runs-on: ubuntu-latest
+
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
     steps:
       - name: Checkout tag
@@ -179,20 +199,22 @@ jobs:
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Publish (skip if token missing)
+        if: env.CARGO_REGISTRY_TOKEN != ''
         run: cargo publish
+
+      - name: Note (token missing)
+        if: env.CARGO_REGISTRY_TOKEN == ''
+        run: echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish."
 
   finalize:
     name: Finalize release
     needs: [prepare, publish]
-    if: needs.prepare.outputs.do_release == 'true'
+    if: needs.prepare.outputs.do_release == 'true' && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
     runs-on: ubuntu-latest
 
     steps:
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release edit "${{ needs.prepare.outputs.tag }}" --draft=false
+        run: gh release edit "${{ needs.prepare.outputs.tag }}" --draft=false
