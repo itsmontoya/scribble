@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: read
 
 concurrency:
   group: release-${{ github.event.pull_request.number }}
@@ -30,25 +31,38 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Decide bump from PR labels
+      - name: Decide bump from PR labels (via API)
         id: decide
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
-          labels='${{ toJson(github.event.pull_request.labels) }}'
+          # Pull Request is also an Issue; labels live on the issues endpoint.
+          label_names="$(gh api "/repos/${REPO}/issues/${PR_NUMBER}" --jq '.labels[].name' || true)"
+
+          echo "Labels on PR #${PR_NUMBER}:"
+          echo "${label_names:-<none>}"
 
           bump=""
-          echo "$labels" | grep -q '"name":"major"' && bump="major"
-          echo "$labels" | grep -q '"name":"minor"' && bump="${bump:-minor}"
-          echo "$labels" | grep -q '"name":"patch"' && bump="${bump:-patch}"
+          echo "$label_names" | grep -qx "major" && bump="major" || true
+          if [ -z "$bump" ]; then
+            echo "$label_names" | grep -qx "minor" && bump="minor" || true
+          fi
+          if [ -z "$bump" ]; then
+            echo "$label_names" | grep -qx "patch" && bump="patch" || true
+          fi
 
           if [ -z "$bump" ]; then
-            echo "No version label found; skipping release."
+            echo "No version label (major/minor/patch) found; skipping release."
             echo "do_release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          echo "Selected bump: $bump"
           echo "do_release=true" >> "$GITHUB_OUTPUT"
           echo "bump=$bump" >> "$GITHUB_OUTPUT"
 
@@ -90,11 +104,11 @@ jobs:
           git add Cargo.toml Cargo.lock || true
           git commit -m "chore(release): v${{ steps.version.outputs.version }}" || true
 
-          git tag "v${{ steps.version.outputs.version }}"
+          git tag "${{ steps.version.outputs.tag }}"
           git push origin HEAD:main
-          git push origin "v${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.tag }}"
 
-      - name: Create draft release
+      - name: Create draft GitHub release
         if: steps.decide.outputs.do_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
@@ -138,18 +152,24 @@ jobs:
           version="${{ needs.prepare.outputs.version }}"
           os="${{ runner.os }}"
 
-          # Filter for Windows .exe, otherwise take all regular files in target/release
           if [ "$os" = "Windows" ]; then
+            arch="${PROCESSOR_ARCHITECTURE:-unknown}"
             pattern="target/release/*.exe"
           else
+            arch="$(uname -m)"
             pattern="target/release/*"
           fi
 
           for bin in $pattern; do
             [ -f "$bin" ] || continue
-            name=$(basename "$bin")
-            # name already includes .exe on Windows
-            cp "$bin" "dist/${name}-v${version}-${os}"
+            name="$(basename "$bin")"
+
+            # Avoid uploading non-binary files on unix (best-effort: only executable files)
+            if [ "$os" != "Windows" ]; then
+              [ -x "$bin" ] || continue
+            fi
+
+            cp "$bin" "dist/${name}-v${version}-${os}-${arch}"
           done
 
       - name: Generate SHA256 checksums (Linux/macOS)
@@ -165,12 +185,12 @@ jobs:
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
-          $files = Get-ChildItem -Path dist -File
+          $files = Get-ChildItem -Path dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" }
           $lines = foreach ($f in $files) {
             $h = Get-FileHash -Algorithm SHA256 $f.FullName
-            "$($h.Hash.ToLower())  $($f.Name)"
+            "$($h.Hash.ToLower()) $($f.Name)"
           }
-          $lines | Out-File -FilePath "dist/SHA256SUMS.txt" -Encoding ascii
+          $lines | Set-Content -NoNewline -Path dist/SHA256SUMS.txt
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
