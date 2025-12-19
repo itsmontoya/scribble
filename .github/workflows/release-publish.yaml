@@ -31,33 +31,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          python - <<'PY'
-          import json, os, re
+          # Extract commit messages included in this push (merge commit + PR commits)
+          msgs="$(jq -r '.commits[].message // empty' "$GITHUB_EVENT_PATH" || true)"
 
-          event_path = os.environ["GITHUB_EVENT_PATH"]
-          with open(event_path, "r", encoding="utf-8") as f:
-              ev = json.load(f)
+          # Find first message like: chore(release): vX.Y.Z
+          version="$(
+            printf "%s\n" "$msgs" \
+              | sed -nE 's/^chore\(release\): v([0-9]+\.[0-9]+\.[0-9]+).*$/\1/p' \
+              | head -n 1
+          )"
 
-          commits = ev.get("commits", [])
-          pat = re.compile(r"^chore\(release\): v(\d+\.\d+\.\d+)\b")
+          if [ -z "${version:-}" ]; then
+            echo "No release bump commit found; skipping publish."
+            echo "do_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-          for c in commits:
-              msg = (c.get("message") or "").strip()
-              m = pat.match(msg)
-              if m:
-                  v = m.group(1)
-                  print(f"do_release=true")
-                  print(f"version={v}")
-                  print(f"tag=v{v}")
-                  break
-          else:
-              print("do_release=false")
-          PY >> "$GITHUB_OUTPUT"
-
-      - name: Summary
-        if: steps.detect.outputs.do_release == 'true'
-        run: |
-          echo "Release detected: ${{ steps.detect.outputs.tag }}"
+          echo "Detected release bump: v${version}"
+          echo "do_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
 
   tag_and_release:
     name: Tag + create draft release
@@ -81,15 +74,13 @@ jobs:
 
           tag="${{ needs.detect.outputs.tag }}"
 
-          # Create tag if missing (rerun-safe)
           if git rev-parse "$tag" >/dev/null 2>&1; then
             echo "Tag $tag already exists locally."
           else
             git tag "$tag"
           fi
 
-          # Push tag (remote may already have it on rerun)
-          git push origin "$tag" || echo "Tag push failed (maybe already exists). Continuing."
+          git push origin "$tag" || echo "Tag push skipped (already exists)."
 
       - name: Create draft GitHub release
         uses: softprops/action-gh-release@v2
@@ -148,7 +139,7 @@ jobs:
             [ -f "$bin" ] || continue
             name="$(basename "$bin")"
 
-            # Avoid uploading non-binary files on unix (best-effort: only executable files)
+            # Best-effort: only upload executable files on unix
             if [ "$os" != "Windows" ]; then
               [ -x "$bin" ] || continue
             fi
