@@ -25,7 +25,7 @@ fn new_scribble_or_skip() -> anyhow::Result<Option<Scribble>> {
     Ok(Some(Scribble::new(WHISPER_MODEL, VAD_MODEL)?))
 }
 
-fn run_to_json(scribble: &Scribble, opts: &Opts) -> anyhow::Result<String> {
+fn run_to_json(scribble: &mut Scribble, opts: &Opts) -> anyhow::Result<String> {
     let wav = std::fs::File::open(FIXTURE_WAV)?;
     let mut out = Vec::new();
 
@@ -42,7 +42,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
         "missing fixture WAV: {FIXTURE_WAV}"
     );
 
-    let Some(scribble) = new_scribble_or_skip()? else {
+    let Some(mut scribble) = new_scribble_or_skip()? else {
         return Ok(()); // skipped
     };
 
@@ -86,7 +86,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
     ];
 
     for (name, opts) in cases {
-        let json = run_to_json(&scribble, &opts)?;
+        let json = run_to_json(&mut scribble, &opts)?;
         assert!(
             json.contains("Treat. Yo. Self."),
             "case `{name}` did not contain expected phrase. Output:\n{json}"
