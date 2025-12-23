@@ -1,20 +1,16 @@
 //! Stream-decode audio from media (audio or video containers) into Whisper-friendly
 //! mono `f32` @ 16kHz, delivered in chunks via a callback.
 //!
-//! Input is any `Read` source (stdin, sockets, HTTP bodies, files, etc.).
-//!
-//! Important notes:
-//! - This decoder treats the input as **unseekable** to support livestreaming.
-//! - Some container layouts (notably certain MP4/MOV files) may require seeking to
-//!   locate metadata (e.g. `moov` at the end). Those inputs will fail unless they are
-//!   packaged for streaming (e.g. fMP4 with init segment first, TS, ADTS, etc.).
+//! We support two input shapes:
+//! - `Read + Seek` (most robust; supports containers that require seeking).
+//! - `Read` only (true streaming; works for stream-friendly container layouts).
 //!
 //! Design overview:
 //! - Symphonia demuxes + decodes packets into PCM frames.
 //! - We normalize to interleaved `f32`, downmix to mono, then resample to 16 kHz if needed.
 //! - We emit fixed-size chunks to a `SamplesSink` so callers can process incrementally.
 
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 
 use anyhow::{Context, Result, anyhow, bail};
 use rubato::{Resampler, SincFixedIn, WindowFunction};
@@ -23,7 +19,9 @@ use symphonia::core::audio::{AudioBufferRef, SampleBuffer};
 use symphonia::core::codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::{FormatOptions, FormatReader, Packet, Track};
-use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions, ReadOnlySource};
+use symphonia::core::io::{
+    MediaSource, MediaSourceStream, MediaSourceStreamOptions, ReadOnlySource,
+};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
@@ -62,9 +60,26 @@ impl Default for StreamDecodeOpts {
     }
 }
 
+/// Decode a seekable reader and emit Whisper-friendly chunks into `sink`.
+///
+/// This is the most compatible mode for "random media files", especially formats
+/// that rely on metadata at the end (some MP4/MOV layouts).
+pub fn decode_to_whisper_stream_from_reader<R>(
+    reader: R,
+    opts: StreamDecodeOpts,
+    sink: &mut dyn SamplesSink,
+) -> Result<()>
+where
+    R: Read + Seek + Send + Sync + 'static,
+{
+    let source = ReadSeekMediaSource::new(reader)?;
+    decode_impl(Box::new(source), opts, sink)
+}
+
 /// Decode an unseekable stream and emit Whisper-friendly chunks into `sink`.
 ///
-/// This is our primary entry point for "accept anything" input sources.
+/// This is the best mode for true streaming (stdin, sockets, live HTTP bodies),
+/// but some container layouts may still require seeking to locate metadata.
 pub fn decode_to_whisper_stream_from_read<R>(
     reader: R,
     opts: StreamDecodeOpts,
@@ -73,10 +88,22 @@ pub fn decode_to_whisper_stream_from_read<R>(
 where
     R: Read + Send + Sync + 'static,
 {
-    let (mut format, track) = probe_read_and_pick_default_track(reader, &opts)?;
+    let source = ReadOnlySource::new(reader);
+    decode_impl(Box::new(source), opts, sink)
+}
+
+/// Shared implementation for both input modes.
+///
+/// We take a boxed `MediaSource` so we can reuse *all* decode logic without duplicating it.
+fn decode_impl(
+    source: Box<dyn MediaSource>,
+    opts: StreamDecodeOpts,
+    sink: &mut dyn SamplesSink,
+) -> Result<()> {
+    let (mut format, track) = probe_source_and_pick_default_track(source, &opts)?;
     let mut decoder = make_decoder_for_track(&track)?;
 
-    // We keep some state across packets (buffers/resampler accumulator).
+    // Mutable state shared across packets (buffers + resampler accumulator).
     let mut state = DecodeState::new(track.id, opts);
 
     decode_loop(&mut format, &mut decoder, &mut state, sink)?;
@@ -98,6 +125,9 @@ struct DecodeState {
 
     // Accumulator for mono source samples before feeding blocks into the resampler.
     mono_src_acc: Vec<f32>,
+
+    // Reused input channel vec for rubato (avoid vec![mono.to_vec()] each call).
+    resample_in_chan: Vec<f32>,
 }
 
 impl DecodeState {
@@ -108,26 +138,69 @@ impl DecodeState {
             sample_buf_f32: None,
             resampler: None,
             mono_src_acc: Vec::new(),
+            resample_in_chan: Vec::new(),
         }
     }
 }
 
-/// Probe the container from an unseekable stream and pick a default audio track.
-fn probe_read_and_pick_default_track<R>(
-    reader: R,
+/// A `MediaSource` wrapper for `Read + Seek` inputs.
+///
+/// Symphonia probing can behave differently depending on whether the source is marked
+/// seekable and whether `byte_len()` is known. For file-like sources, it's often helpful
+/// to provide a length when possible.
+struct ReadSeekMediaSource<R> {
+    inner: R,
+    len: Option<u64>,
+}
+
+impl<R> ReadSeekMediaSource<R> {
+    fn new(mut inner: R) -> Result<Self>
+    where
+        R: Seek,
+    {
+        // Best-effort: get byte length and restore cursor.
+        let cur = inner.seek(SeekFrom::Current(0)).ok();
+        let end = inner.seek(SeekFrom::End(0)).ok();
+        if let Some(cur) = cur {
+            let _ = inner.seek(SeekFrom::Start(cur));
+        }
+        Ok(Self { inner, len: end })
+    }
+}
+
+impl<R: Read> Read for ReadSeekMediaSource<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl<R: Seek> Seek for ReadSeekMediaSource<R> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+impl<R: Read + Seek + Send + Sync> MediaSource for ReadSeekMediaSource<R> {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        self.len
+    }
+}
+
+/// Probe the container and pick a default audio track.
+fn probe_source_and_pick_default_track(
+    source: Box<dyn MediaSource>,
     opts: &StreamDecodeOpts,
-) -> Result<(Box<dyn FormatReader>, Track)>
-where
-    R: Read + Send + Sync + 'static,
-{
+) -> Result<(Box<dyn FormatReader>, Track)> {
     let mss_opts = MediaSourceStreamOptions {
         // Symphonia requires a power-of-two buffer > 32KiB for good probing behavior.
         buffer_len: 256 * 1024,
     };
 
-    // Wrap as an unseekable source (streaming-friendly).
-    let source = ReadOnlySource::new(reader);
-    let mss = MediaSourceStream::new(Box::new(source), mss_opts);
+    let mss = MediaSourceStream::new(source, mss_opts);
 
     // Optional hint can speed up probing and improve success on tricky streams.
     let mut hint = Hint::new();
@@ -141,7 +214,7 @@ where
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &format_opts, &metadata_opts)
         .map_err(|e| anyhow!(e))
-        .context("failed to probe media stream (input is treated as unseekable)")?;
+        .context("failed to probe media stream")?;
 
     let format = probed.format;
 
@@ -315,7 +388,7 @@ fn ensure_resampler(state: &mut DecodeState, src_rate: u32) -> Result<()> {
 
     // How many source frames we feed rubato per `process()` call.
     //
-    // This is a tradeoff:
+    // Tradeoff:
     // - larger chunks are more efficient
     // - smaller chunks reduce latency
     let in_chunk_src_frames = 2048;
@@ -341,12 +414,6 @@ fn ensure_resampler(state: &mut DecodeState, src_rate: u32) -> Result<()> {
 }
 
 /// Accumulate source samples and flush full resampler blocks into the sink.
-///
-/// We buffer until rubato reports it can accept a full block (`input_frames_max()`),
-/// then repeatedly:
-/// - drain one input block
-/// - resample
-/// - emit 16 kHz chunks
 fn push_and_flush_resampler(
     state: &mut DecodeState,
     mono_src: &[f32],
@@ -355,29 +422,19 @@ fn push_and_flush_resampler(
     state.mono_src_acc.extend_from_slice(mono_src);
 
     loop {
-        let in_max = state
-            .resampler
-            .as_ref()
-            .expect("resampler must be initialized before flushing")
-            .input_frames_max();
+        let in_max = match state.resampler.as_ref() {
+            Some(rs) => rs.input_frames_max(),
+            None => bail!("resampler not initialized"),
+        };
 
         if state.mono_src_acc.len() < in_max {
             break;
         }
 
         // Drain exactly one input block for rubato.
-        //
-        // This uses `collect()` which allocates; that's OK for now, and keeps the code clear.
-        // If we ever want to micro-optimize, we can reuse a scratch vec.
         let block: Vec<f32> = state.mono_src_acc.drain(..in_max).collect();
 
-        let out = resample_block(
-            state
-                .resampler
-                .as_mut()
-                .expect("resampler must be initialized before resampling"),
-            &block,
-        )?;
+        let out = resample_block(state, &block)?;
 
         for chunk in out.chunks(state.opts.target_chunk_frames_16k) {
             if !sink.on_samples(chunk)? {
@@ -390,10 +447,19 @@ fn push_and_flush_resampler(
 }
 
 /// Resample one mono block and return the mono 16 kHz output.
-fn resample_block(rs: &mut SincFixedIn<f32>, mono_src_block: &[f32]) -> Result<Vec<f32>> {
-    // rubato expects `Vec<Vec<f32>>` for N channels; for mono we pass a single channel.
+fn resample_block(state: &mut DecodeState, mono_src_block: &[f32]) -> Result<Vec<f32>> {
+    let rs = state
+        .resampler
+        .as_mut()
+        .ok_or_else(|| anyhow!("resampler not initialized"))?;
+
+    // Reuse the channel vec to avoid allocating mono_src_block.to_vec() into a fresh Vec each call.
+    state.resample_in_chan.clear();
+    state.resample_in_chan.extend_from_slice(mono_src_block);
+
+    let input = vec![state.resample_in_chan.clone()];
     let out = rs
-        .process(&vec![mono_src_block.to_vec()], None)
+        .process(&input, None)
         .map_err(|e| anyhow!(e))
         .context("resampler process failed")?;
 
@@ -410,7 +476,7 @@ fn resample_block(rs: &mut SincFixedIn<f32>, mono_src_block: &[f32]) -> Result<V
 /// a final block, then drain until empty.
 fn finalize_stream(state: &mut DecodeState, sink: &mut dyn SamplesSink) -> Result<()> {
     let Some(rs) = state.resampler.as_mut() else {
-        // No resampling happened, nothing to flush here.
+        // No resampling happened.
         return Ok(());
     };
 
@@ -430,7 +496,7 @@ fn finalize_stream(state: &mut DecodeState, sink: &mut dyn SamplesSink) -> Resul
 
     while !state.mono_src_acc.is_empty() {
         let block: Vec<f32> = state.mono_src_acc.drain(..in_max).collect();
-        let out = resample_block(rs, &block)?;
+        let out = resample_block(state, &block)?;
 
         for chunk in out.chunks(state.opts.target_chunk_frames_16k) {
             if !sink.on_samples(chunk)? {
