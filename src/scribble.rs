@@ -12,10 +12,11 @@
 //! This module is deliberately “high level”: it wires up decoding → (optional) VAD → Whisper → encoder,
 //! while keeping the lower-level pieces testable in their own modules.
 
-use anyhow::Result;
-use hound::WavSpec;
-use std::io::{BufWriter, Read, Seek, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::Path;
+
+use anyhow::{Context, Result, ensure};
+use hound::WavSpec;
 use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
 
 use crate::ctx::get_context;
@@ -35,7 +36,7 @@ use crate::vtt_encoder::VttEncoder;
 /// `Scribble` owns the long-lived resources required for transcription:
 /// - a `WhisperContext` (loaded model + runtime state)
 /// - a `WhisperVadContext` (loaded VAD model + runtime state)
-/// - the VAD model path (kept for debugging/diagnostics)
+/// - the VAD model path (kept for diagnostics)
 ///
 /// Typical usage:
 /// - Construct once (model loading happens here).
@@ -61,24 +62,30 @@ impl Scribble {
 
         // We require a valid VAD model path up front so we can provide a clear error early.
         let vad_model_path = vad_model_path.into();
-        let vad_path = Path::new(&vad_model_path);
+        ensure!(
+            !vad_model_path.trim().is_empty(),
+            "VAD model path must be provided"
+        );
 
-        if vad_model_path.trim().is_empty() {
-            anyhow::bail!("VAD model path must be provided");
-        }
-        if !vad_path.exists() {
-            anyhow::bail!("VAD model not found at '{}'", vad_model_path);
-        }
-        if !vad_path.is_file() {
-            anyhow::bail!("VAD model path is not a file: '{}'", vad_model_path);
-        }
+        let vad_path = Path::new(&vad_model_path);
+        ensure!(
+            vad_path.exists(),
+            "VAD model not found at '{}'",
+            vad_model_path
+        );
+        ensure!(
+            vad_path.is_file(),
+            "VAD model path is not a file: '{}'",
+            vad_model_path
+        );
 
         // Load the Whisper model once (this is the expensive part).
         let ctx = get_context(model_path.as_ref())?;
 
         // Load the VAD model once so repeated transcriptions don't re-initialize it.
         let vad_ctx_params = WhisperVadContextParams::default();
-        let vad_ctx = WhisperVadContext::new(&vad_model_path, vad_ctx_params)?;
+        let vad_ctx = WhisperVadContext::new(&vad_model_path, vad_ctx_params)
+            .with_context(|| format!("failed to load VAD model from '{}'", vad_model_path))?;
 
         Ok(Self {
             ctx,
@@ -89,21 +96,20 @@ impl Scribble {
 
     /// Transcribe an input stream and write the result to an output writer.
     ///
-    /// We accept a generic `Read + Seek` input rather than a filename so callers can:
-    /// - pass `File`
-    /// - pass an in-memory cursor
-    /// - pass any other seekable reader
+    /// We accept a generic `Read` input rather than a filename so callers can pass:
+    /// - `File`
+    /// - stdin
+    /// - sockets / HTTP bodies
+    /// - any other byte stream
     ///
     /// We decode audio into a mono 16kHz stream (whisper.cpp’s expected format) using the
     /// `decoder` module, optionally apply VAD, and then run Whisper and encode segments.
     ///
-    /// Notes on bounds:
-    /// - We require `Seek` because many audio decoding paths need it (or the wrappers around them do).
-    /// - The `Send + Sync + 'static` bounds come from the decoder API you’re using; if you later relax
-    ///   those constraints, we can simplify these bounds too.
+    /// Note: The `Send + Sync + 'static` bounds mirror the decoder API. If you later relax
+    /// those constraints in `decoder`, we can simplify these bounds too.
     pub fn transcribe<R, W>(&mut self, r: R, w: W, opts: &Opts) -> Result<()>
     where
-        R: Read + Seek + Send + Sync + 'static,
+        R: Read + Send + Sync + 'static,
         W: Write,
     {
         // We decode into a `Vec<f32>` because Whisper wants a contiguous sample buffer.
