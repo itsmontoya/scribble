@@ -20,7 +20,7 @@ use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
 
 use crate::ctx::get_context;
 use crate::decoder::{
-    SamplesSink, StreamDecodeOpts, WHISPER_SAMPLE_RATE, decode_to_whisper_stream_from_reader,
+    SamplesSink, StreamDecodeOpts, WHISPER_SAMPLE_RATE, decode_to_whisper_stream_from_read,
 };
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::logging::init_whisper_logging;
@@ -113,7 +113,7 @@ impl Scribble {
 
         // Decode any supported input into Whisper-compatible samples (mono, 16kHz).
         // The decoder pushes chunks into our sink via `on_samples`.
-        decode_to_whisper_stream_from_reader(r, StreamDecodeOpts::default(), &mut sink)?;
+        decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)?;
 
         // If decoding produced no audio, we exit successfully with no output.
         if samples.is_empty() {
