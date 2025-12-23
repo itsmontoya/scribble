@@ -24,3 +24,5 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1", features = ["v4"] }
 indicatif = "0.17"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }
+rubato = "0.16"
+symphonia = { version = "0.5", features = ["all"] }
