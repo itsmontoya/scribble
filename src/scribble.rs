@@ -1,12 +1,16 @@
 //! High-level API for running transcriptions with Scribble.
 //!
 //! We expose a single, ergonomic entry point (`Scribble`) that wraps the lower-level
-//! Whisper, VAD, and encoding logic.
+//! Whisper, VAD, decoding, and encoding logic.
 //!
 //! The intent is:
 //! - We load the Whisper model once (expensive).
-//! - We reuse the context to transcribe multiple inputs.
-//! - Callers choose an output format via options.
+//! - We load the VAD model once (also somewhat expensive).
+//! - We reuse both contexts to transcribe multiple inputs.
+//! - Callers choose output format and behavior via `Opts`.
+//!
+//! This module is deliberately “high level”: it wires up decoding → (optional) VAD → Whisper → encoder,
+//! while keeping the lower-level pieces testable in their own modules.
 
 use anyhow::Result;
 use hound::WavSpec;
@@ -15,6 +19,9 @@ use std::path::Path;
 use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams, WhisperVadParams};
 
 use crate::ctx::get_context;
+use crate::decoder::{
+    SamplesSink, StreamDecodeOpts, WHISPER_SAMPLE_RATE, decode_to_whisper_stream_from_reader,
+};
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::logging::init_whisper_logging;
 use crate::opts::Opts;
@@ -22,18 +29,20 @@ use crate::output_type::OutputType;
 use crate::segments::write_segments;
 use crate::vad::apply_vad;
 use crate::vtt_encoder::VttEncoder;
-use crate::wav::get_samples_from_wav_reader;
 
 /// The main high-level transcription entry point.
 ///
 /// `Scribble` owns the long-lived resources required for transcription:
 /// - a `WhisperContext` (loaded model + runtime state)
 /// - a `WhisperVadContext` (loaded VAD model + runtime state)
-/// - the VAD model path (kept so configuration is inspectable/debuggable)
+/// - the VAD model path (kept for debugging/diagnostics)
 ///
 /// Typical usage:
-/// - Construct once (model load happens here).
+/// - Construct once (model loading happens here).
 /// - Call `transcribe` many times with different inputs and outputs.
+///
+/// Note: `transcribe` takes `&mut self` because whisper_rs’s VAD context requires mutable access
+/// to run inference (`segments_from_samples` takes `&mut self`).
 pub struct Scribble {
     ctx: WhisperContext,
     vad_model_path: String,
@@ -43,17 +52,14 @@ pub struct Scribble {
 impl Scribble {
     /// Create a new `Scribble` instance by loading Whisper + VAD models from disk.
     ///
-    /// Model loading is expensive, so we expect `Scribble::new` to be called sparingly
-    /// and reused across multiple transcriptions.
-    ///
-    /// VAD model path is required. We validate it here so once construction succeeds,
-    /// the rest of the library can assume VAD is available when enabled via `Opts`.
+    /// We fail fast if the VAD model path is missing or invalid. This keeps invariants simple:
+    /// once `Scribble::new` succeeds, we know VAD is available whenever enabled via `Opts`.
     pub fn new(model_path: impl AsRef<str>, vad_model_path: impl Into<String>) -> Result<Self> {
-        // We keep whisper logs quiet by default so callers fully control output.
+        // We keep whisper logs quiet by default so callers fully control stdout/stderr.
         // This function is idempotent (safe to call multiple times).
         init_whisper_logging();
 
-        // We require a valid VAD model path up front so we can fail fast with a clear error.
+        // We require a valid VAD model path up front so we can provide a clear error early.
         let vad_model_path = vad_model_path.into();
         let vad_path = Path::new(&vad_model_path);
 
@@ -67,11 +73,10 @@ impl Scribble {
             anyhow::bail!("VAD model path is not a file: '{}'", vad_model_path);
         }
 
-        // Load the Whisper model once (expensive).
+        // Load the Whisper model once (this is the expensive part).
         let ctx = get_context(model_path.as_ref())?;
 
-        // Create a VAD context from the model on disk.
-        // We do this once so repeated transcriptions don't re-initialize it.
+        // Load the VAD model once so repeated transcriptions don't re-initialize it.
         let vad_ctx_params = WhisperVadContextParams::default();
         let vad_ctx = WhisperVadContext::new(&vad_model_path, vad_ctx_params)?;
 
@@ -82,21 +87,47 @@ impl Scribble {
         })
     }
 
-    /// Transcribe a WAV stream and write the result to an output writer.
+    /// Transcribe an input stream and write the result to an output writer.
     ///
-    /// Reader requirements:
-    /// - `Read`: to consume WAV bytes
-    /// - `Seek`: required by `hound::WavReader` to parse headers correctly
+    /// We accept a generic `Read + Seek` input rather than a filename so callers can:
+    /// - pass `File`
+    /// - pass an in-memory cursor
+    /// - pass any other seekable reader
     ///
-    /// Output is streamed directly into the provided writer.
+    /// We decode audio into a mono 16kHz stream (whisper.cpp’s expected format) using the
+    /// `decoder` module, optionally apply VAD, and then run Whisper and encode segments.
+    ///
+    /// Notes on bounds:
+    /// - We require `Seek` because many audio decoding paths need it (or the wrappers around them do).
+    /// - The `Send + Sync + 'static` bounds come from the decoder API you’re using; if you later relax
+    ///   those constraints, we can simplify these bounds too.
     pub fn transcribe<R, W>(&mut self, r: R, w: W, opts: &Opts) -> Result<()>
     where
-        R: Read + Seek,
+        R: Read + Seek + Send + Sync + 'static,
         W: Write,
     {
-        // Read and normalize audio samples from the WAV stream.
-        // This enforces mono, 16 kHz audio to match whisper.cpp expectations.
-        let (mut samples, spec) = get_samples_from_wav_reader(r)?;
+        // We decode into a `Vec<f32>` because Whisper wants a contiguous sample buffer.
+        // (If we later add incremental/streaming Whisper, we'll revisit this.)
+        let mut samples = Vec::<f32>::new();
+        let mut sink = VecSamplesSink::new(&mut samples);
+
+        // Decode any supported input into Whisper-compatible samples (mono, 16kHz).
+        // The decoder pushes chunks into our sink via `on_samples`.
+        decode_to_whisper_stream_from_reader(r, StreamDecodeOpts::default(), &mut sink)?;
+
+        // If decoding produced no audio, we exit successfully with no output.
+        if samples.is_empty() {
+            return Ok(());
+        }
+
+        // We construct a minimal `WavSpec` for downstream code that relies on sample rate.
+        // Since the decoder guarantees mono 16kHz output, we can hardcode these fields.
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: WHISPER_SAMPLE_RATE,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
 
         // Optionally apply VAD in-place by zeroing out non-speech regions.
         // If VAD finds no speech, we exit successfully with no output.
@@ -111,7 +142,7 @@ impl Scribble {
         let writer = BufWriter::new(w);
 
         // Select an encoder based on the requested output type.
-        // We avoid trait objects here to keep lifetimes simple and explicit.
+        // We keep this explicit (no trait objects) to avoid lifetime surprises.
         match opts.output_type {
             OutputType::Json => {
                 let mut encoder = JsonArrayEncoder::new(writer);
@@ -127,6 +158,9 @@ impl Scribble {
     }
 
     /// Run VAD to identify speech segments, then apply our in-place masking policy.
+    ///
+    /// We return `true` if speech was found and the buffer was modified, and `false` if no
+    /// speech segments were detected.
     fn process_vad(&mut self, spec: &WavSpec, samples: &mut [f32]) -> Result<bool> {
         // We start from defaults and then apply the specific policy we want.
         let mut vad_params = WhisperVadParams::default();
@@ -161,5 +195,30 @@ impl Scribble {
     /// This is primarily intended for diagnostics and debugging.
     pub fn vad_model_path(&self) -> &str {
         &self.vad_model_path
+    }
+}
+
+/// A simple `SamplesSink` implementation that appends decoded chunks into a `Vec<f32>`.
+///
+/// We keep this type private to the module because it's an implementation detail of `transcribe`.
+struct VecSamplesSink<'a> {
+    out: &'a mut Vec<f32>,
+}
+
+impl<'a> VecSamplesSink<'a> {
+    /// Create a sink that appends decoded samples into `out`.
+    fn new(out: &'a mut Vec<f32>) -> Self {
+        Self { out }
+    }
+}
+
+impl<'a> SamplesSink for VecSamplesSink<'a> {
+    /// Receive a chunk of mono 16kHz samples.
+    ///
+    /// Returning `Ok(true)` tells the decoder to keep going.
+    fn on_samples(&mut self, samples_16k_mono: &[f32]) -> Result<bool> {
+        // We append chunks as they arrive. This preserves ordering and builds the full buffer.
+        self.out.extend_from_slice(samples_16k_mono);
+        Ok(true)
     }
 }
