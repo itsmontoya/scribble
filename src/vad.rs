@@ -1,59 +1,148 @@
+// src/vad.rs
+
 use anyhow::{Result, anyhow};
 use hound::WavSpec;
-use whisper_rs::WhisperVadSegments;
+use whisper_rs::{WhisperVadContext, WhisperVadParams, WhisperVadSegments};
 
-/// Apply voice activity detection (VAD) to the audio buffer in-place.
+/// Run VAD to identify speech segments, then replace the sample buffer with speech-only audio.
 ///
-/// What we do:
-/// - We receive a list of detected "speech segments" (time ranges).
-/// - We keep samples inside those speech segments untouched.
-/// - We zero out everything outside speech segments (leading silence, gaps, trailing silence).
+/// What this does:
+/// - Runs VAD on the input buffer and gets a list of speech time ranges.
+/// - Applies a policy (padding, minimum duration, and gap merging).
+/// - Concatenates only the speech regions into a new buffer.
+/// - Replaces `samples` with that speech-only buffer.
 ///
 /// Return value:
-/// - `Ok(true)`  => VAD found at least one speech segment and we modified the buffer
-/// - `Ok(false)` => no speech segments were found (caller may choose to stop early)
+/// - `Ok(true)`  => at least one speech segment survived filtering and `samples` was replaced
+/// - `Ok(false)` => no speech was detected (or everything was filtered out)
 ///
-/// Why this design:
-/// - Many downstream pipelines prefer the original buffer length (timestamps remain stable),
-///   so we zero out non-speech rather than physically removing samples.
-pub fn apply_vad(
+/// Design note:
+/// - This *does* change buffer length (unlike our "zero-out non-speech" approach).
+/// - That means timestamps from Whisper will refer to the new, speech-only timeline.
+///   That's fine for "just get me the words" pipelines, but not ideal if you need
+///   timestamps aligned to the original media.
+pub fn to_speech_only(
+    ctx: &mut WhisperVadContext,
+    spec: &WavSpec,
+    samples: &mut Vec<f32>,
+) -> Result<bool> {
+    to_speech_only_with_policy(ctx, spec, samples, DEFAULT_VAD_POLICY)
+}
+
+/// Same as [`to_speech_only`] but allows a custom policy.
+pub fn to_speech_only_with_policy(
+    ctx: &mut WhisperVadContext,
+    spec: &WavSpec,
+    samples: &mut Vec<f32>,
+    policy: VadPolicy,
+) -> Result<bool> {
+    // Build VAD parameters from defaults and apply our policy knobs.
+    let mut vad_params = WhisperVadParams::default();
+
+    // We cap max speech duration to keep VAD from producing extremely long segments.
+    // (This value is in milliseconds in whisper_rs.)
+    vad_params.set_max_speech_duration(15_000.0);
+
+    // Some whisper_rs versions expose these setters. If yours doesn't, remove them
+    // and keep the filtering logic in `extract_speech_with_policy`.
+    vad_params.set_threshold(policy.threshold);
+    vad_params.set_min_speech_duration(policy.min_speech_ms as i32);
+
+    // Run VAD to produce segments from our sample buffer.
+    let segments = ctx.segments_from_samples(vad_params, samples)?;
+
+    // Extract speech windows (with padding/merge policy) and replace the full buffer.
+    let Some(speech_only) = extract_speech_with_policy(spec, &segments, samples, policy)? else {
+        return Ok(false);
+    };
+
+    *samples = speech_only;
+    Ok(!samples.is_empty())
+}
+
+/// Extract speech samples from `samples` according to `segments` and `policy`.
+///
+/// Returns:
+/// - `Ok(Some(vec))` when one or more ranges are selected
+/// - `Ok(None)` when no ranges are selected
+fn extract_speech_with_policy(
     spec: &WavSpec,
     segments: &WhisperVadSegments,
-    samples: &mut [f32],
-) -> Result<bool> {
+    samples: &[f32],
+    policy: VadPolicy,
+) -> Result<Option<Vec<f32>>> {
     let n = segments.num_segments();
     if n == 0 {
-        // No speech detected. We return `false` so callers can exit early.
-        return Ok(false);
+        // No speech detected.
+        return Ok(None);
     }
 
     // Convert VAD timestamps into sample indices using our WAV sample rate.
     let sample_rate = spec.sample_rate as f32;
 
-    // We track the end of the last speech region so we can zero out gaps between speech.
-    let mut last_end_idx: usize = 0;
+    // Convert policy values from ms → samples once.
+    let pre_pad_samples = ms_to_samples(policy.pre_pad_ms, sample_rate);
+    let post_pad_samples = ms_to_samples(policy.post_pad_ms, sample_rate);
+    let min_speech_samples = ms_to_samples(policy.min_speech_ms, sample_rate);
+    let gap_merge_samples = ms_to_samples(policy.gap_merge_ms, sample_rate);
+
+    // Collect padded ranges, then merge overlaps / near-gaps.
+    //
+    // Invariant: `ranges` stays sorted and non-overlapping after the merge step.
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
 
     for i in 0..n {
-        let (start_idx, end_idx) = segment_sample_indexes(segments, i, sample_rate, samples.len())?;
+        let (mut start_idx, mut end_idx) =
+            segment_sample_indexes(segments, i, sample_rate, samples.len())?;
 
-        // Zero the gap before this speech segment: [last_end_idx .. start_idx)
-        if start_idx > last_end_idx {
-            zero_out_samples(&mut samples[last_end_idx..start_idx]);
+        // Drop very short speech segments according to policy.
+        let dur = end_idx.saturating_sub(start_idx);
+        if dur < min_speech_samples {
+            continue;
         }
 
-        // Keep speech untouched: [start_idx .. end_idx)
-        //
-        // We only advance `last_end_idx` forward (it should already be monotonic, but this
-        // makes the logic robust if VAD ever returns overlapping or out-of-order segments).
-        last_end_idx = last_end_idx.max(end_idx);
+        // Apply padding in samples.
+        start_idx = start_idx.saturating_sub(pre_pad_samples);
+        end_idx = (end_idx + post_pad_samples).min(samples.len());
+
+        if start_idx >= end_idx {
+            continue;
+        }
+
+        // Merge with previous if overlapping or gap is small.
+        if let Some((_, prev_end)) = ranges.last_mut() {
+            let gap = start_idx.saturating_sub(*prev_end);
+            if start_idx <= *prev_end || gap <= gap_merge_samples {
+                *prev_end = (*prev_end).max(end_idx);
+                continue;
+            }
+        }
+
+        ranges.push((start_idx, end_idx));
     }
 
-    // Zero everything after the final speech segment: [last_end_idx .. end)
-    if last_end_idx < samples.len() {
-        zero_out_samples(&mut samples[last_end_idx..]);
+    if ranges.is_empty() {
+        return Ok(None);
     }
 
-    Ok(true)
+    // Build the concatenated output buffer.
+    //
+    // We precompute capacity to minimize reallocations while we extend.
+    let total_len: usize = ranges.iter().map(|(s, e)| e - s).sum();
+    let mut out = Vec::with_capacity(total_len);
+
+    for (s, e) in ranges {
+        out.extend_from_slice(&samples[s..e]);
+    }
+
+    Ok(Some(out))
+}
+
+/// Convert milliseconds → number of samples at `sample_rate`.
+///
+/// We round to the nearest sample so padding is stable across rates.
+fn ms_to_samples(ms: u32, sample_rate: f32) -> usize {
+    ((ms as f32 / 1000.0) * sample_rate).round() as usize
 }
 
 /// Convert the i'th VAD segment into `(start_idx, end_idx)` sample indices.
@@ -102,10 +191,37 @@ fn segment_sample_indexes(
     Ok((start_idx, end_idx))
 }
 
-/// Zero out the provided samples in-place.
+/// Policy knobs for speech extraction.
 ///
-/// We do this (instead of removing samples) so the buffer length stays the same,
-/// which keeps timestamps stable for downstream processing.
-fn zero_out_samples(samples: &mut [f32]) {
-    samples.fill(0.0);
+/// These values are intentionally simple and expressed in human-friendly units (ms),
+/// and are converted to sample counts using the current WAV sample rate.
+#[derive(Debug, Clone, Copy)]
+pub struct VadPolicy {
+    /// VAD confidence threshold (higher = more conservative).
+    pub threshold: f32,
+
+    /// Padding to include before each speech segment.
+    pub pre_pad_ms: u32,
+
+    /// Padding to include after each speech segment.
+    pub post_pad_ms: u32,
+
+    /// Drop speech segments shorter than this duration.
+    pub min_speech_ms: u32,
+
+    /// Merge adjacent segments if the gap between them is <= this duration.
+    pub gap_merge_ms: u32,
 }
+
+/// Whisper-friendly, conservative policy.
+///
+/// Optimized for transcription quality over aggressiveness:
+/// - generous padding reduces clipped words
+/// - small gap merge reduces over-fragmentation
+pub const DEFAULT_VAD_POLICY: VadPolicy = VadPolicy {
+    threshold: 0.25,
+    pre_pad_ms: 400,
+    post_pad_ms: 700,
+    min_speech_ms: 60,
+    gap_merge_ms: 250,
+};

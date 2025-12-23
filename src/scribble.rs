@@ -16,7 +16,7 @@ use anyhow::Result;
 use hound::WavSpec;
 use std::io::{BufWriter, Read, Seek, Write};
 use std::path::Path;
-use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams, WhisperVadParams};
+use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
 
 use crate::ctx::get_context;
 use crate::decoder::{
@@ -27,7 +27,7 @@ use crate::logging::init_whisper_logging;
 use crate::opts::Opts;
 use crate::output_type::OutputType;
 use crate::segments::write_segments;
-use crate::vad::apply_vad;
+use crate::vad::to_speech_only;
 use crate::vtt_encoder::VttEncoder;
 
 /// The main high-level transcription entry point.
@@ -129,10 +129,10 @@ impl Scribble {
             sample_format: hound::SampleFormat::Int,
         };
 
-        // Optionally apply VAD in-place by zeroing out non-speech regions.
+        // Optionally apply VAD by extracting padded speech windows and concatenating them.
         // If VAD finds no speech, we exit successfully with no output.
         if opts.enable_voice_activity_detection {
-            let found_speech = self.process_vad(&spec, &mut samples)?;
+            let found_speech = to_speech_only(&mut self.vad_ctx, &spec, &mut samples)?;
             if !found_speech {
                 return Ok(());
             }
@@ -155,25 +155,6 @@ impl Scribble {
         }
 
         Ok(())
-    }
-
-    /// Run VAD to identify speech segments, then apply our in-place masking policy.
-    ///
-    /// We return `true` if speech was found and the buffer was modified, and `false` if no
-    /// speech segments were detected.
-    fn process_vad(&mut self, spec: &WavSpec, samples: &mut [f32]) -> Result<bool> {
-        // We start from defaults and then apply the specific policy we want.
-        let mut vad_params = WhisperVadParams::default();
-
-        // We cap max speech duration to keep VAD from producing extremely long segments.
-        // (This value is in milliseconds in whisper_rs.)
-        vad_params.set_max_speech_duration(15000.0);
-
-        // Run VAD to produce segments from our sample buffer.
-        let segments = self.vad_ctx.segments_from_samples(vad_params, samples)?;
-
-        // Apply our masking policy in-place.
-        apply_vad(spec, &segments, samples)
     }
 
     /// Access the underlying Whisper context.
