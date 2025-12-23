@@ -1,7 +1,9 @@
+// src/bin/scribble-cli.rs
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read};
 
 use scribble::opts::Opts;
 use scribble::output_type::OutputType;
@@ -11,7 +13,10 @@ fn main() -> Result<()> {
     let params = Params::parse();
 
     // Map CLI flags into library options.
-    // We keep this mapping explicit so the library stays reusable and the CLI stays thin.
+    //
+    // Keeping this mapping explicit helps:
+    // - keep the library reusable (Opts is the contract)
+    // - keep the CLI thin (just parsing + wiring)
     let opts = Opts {
         enable_translate_to_english: params.enable_translation_to_english,
         enable_voice_activity_detection: params.enable_voice_activity_detection,
@@ -21,64 +26,42 @@ fn main() -> Result<()> {
 
     // Load the Whisper + VAD models (expensive).
     //
-    // `Scribble::new` validates the VAD model path, so once we construct `Scribble`,
+    // `Scribble::new` validates the VAD model path, so once this succeeds,
     // we know VAD is available whenever it is enabled via `Opts`.
     let mut scribble = Scribble::new(params.model_path, params.vad_model_path)?;
 
-    // Open a seekable input source.
+    // Open an input source.
     // - File path → open directly.
-    // - "-"       → buffer stdin into a temp file so the decoder can Seek.
-    let input = open_seekable_input(&params.input)?;
+    // - "-"       → stream stdin.
+    //
+    // Note: we pass `io::stdin()` (not `stdin().lock()`) to avoid non-Send lock guards.
+    let input = open_input(&params.input)?;
 
     // Stream transcription output to stdout.
-    scribble.transcribe(input, io::stdout(), &opts)?;
+    scribble
+        .transcribe(input, io::stdout(), &opts)
+        .context("transcription failed")?;
 
     Ok(())
 }
 
-/// Open an input source that supports `Read + Seek`.
+/// Open an input source as a boxed reader.
 ///
-/// Many container formats (MP4, MKV, etc.) and some decoders require seeking.
-/// For file paths, `File` is already seekable.
-/// For stdin, we spool into a temporary file and rewind it to the beginning.
+/// We return `Box<dyn Read + Send + Sync>` because the decoder pipeline may require
+/// those bounds for its internal threading/ownership model.
 ///
-/// Why a temp file (instead of an in-memory buffer)?
-/// - It avoids large RAM usage for big inputs.
-/// - It keeps stdin support compatible with decoders that require Seek.
-///
-/// Tradeoff:
-/// - This adds disk I/O. If we later add a decode path that supports true streaming,
-///   we can avoid spooling stdin entirely.
-fn open_seekable_input(path: &str) -> Result<Box<dyn ReadSeekSendSync>> {
+/// For stdin:
+/// - We use `io::stdin()` directly (not a lock guard).
+/// - This stays streaming-friendly and avoids temp files.
+fn open_input(path: &str) -> Result<Box<dyn Read + Send + Sync>> {
     if path == "-" {
-        // Create a temp file to spool stdin.
-        let mut tmp =
-            tempfile::NamedTempFile::new().context("failed to create temp file for stdin")?;
-
-        // Copy stdin into the temp file.
-        //
-        // Note: `io::copy` reads until EOF, so the caller controls termination (e.g. piping a file).
-        io::copy(&mut io::stdin(), &mut tmp).context("failed to copy stdin to temp file")?;
-
-        // Convert the temp file into a normal `File` handle and rewind so reads start at the beginning.
-        let mut file = tmp.into_file();
-        file.seek(SeekFrom::Start(0))
-            .context("failed to rewind temp file")?;
-
-        Ok(Box::new(file))
+        Ok(Box::new(io::stdin()))
     } else {
         let file =
             File::open(path).with_context(|| format!("failed to open input file: {path}"))?;
         Ok(Box::new(file))
     }
 }
-
-/// Convenience trait alias for "a seekable reader we can send across threads".
-///
-/// We use a local trait alias instead of unstable `type` aliases for traits.
-/// This keeps signatures readable without pulling in extra crates.
-trait ReadSeekSendSync: Read + Seek + Send + Sync {}
-impl<T> ReadSeekSendSync for T where T: Read + Seek + Send + Sync {}
 
 /// CLI parameters for `scribble`.
 #[derive(Parser, Debug)]
