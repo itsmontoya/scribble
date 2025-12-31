@@ -1,37 +1,86 @@
 //! `scribble` — a small, focused transcription library built on top of Whisper.
 //!
-//! This crate provides:
-//! - Model loading and context management
-//! - Audio preprocessing (VAD, WAV decoding)
-//! - Segment extraction
+//! # Overview
+//!
+//! Scribble provides a clean, idiomatic Rust API for audio transcription,
+//! designed to work equally well in CLI tools and long-running services.
+//!
+//! At a high level, Scribble wires together:
+//! - Media demuxing and audio decoding (via Symphonia)
+//! - Audio normalization and resampling (mono, 16 kHz)
+//! - Optional Voice Activity Detection (VAD)
+//! - Whisper inference
 //! - Pluggable output encoders (JSON, VTT, etc.)
 //!
-//! The library is designed to be used by both CLI tools and long-running services,
-//! with an emphasis on clarity, streaming output, and minimal surprises.
+//! The library emphasizes:
+//! - Explicit control flow
+//! - Streaming-friendly design
+//! - Clear separation of concerns
+//! - Minimal surprises for callers
+//!
+//! Most consumers should start with [`scribble::Scribble`].
 
-// High-level API (most consumers should start here).
-pub mod opts;
+// ─────────────────────────────────────────────────────────────────────────────
+// High-level API
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// User-facing transcription entry point and orchestration logic.
 pub mod scribble;
 
-// Core Whisper context management.
+/// User-configurable transcription options.
+pub mod opts;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Whisper + transcription core
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whisper model loading and context management.
 pub mod ctx;
 
-// Segment data structures and transcription helpers.
+/// Segment data structures and transcription helpers.
 pub mod segments;
 
-// Audio preprocessing and decoding.
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio preprocessing pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Voice Activity Detection (VAD) utilities and policies.
 pub mod vad;
+
+/// Streaming-friendly audio decoding and normalization helpers.
+pub mod decoder;
+
+/// Low-level demux helpers (container probing, packet iteration).
+pub mod demux;
+
+/// Codec-level decode helpers.
+pub mod decode;
+
+/// Audio resampling, downmixing, and chunk emission pipeline.
+pub mod audio_pipeline;
+
+/// WAV helpers (primarily for tests and simple inputs).
 pub mod wav;
 
-// Output selection and encoder interfaces.
+// ─────────────────────────────────────────────────────────────────────────────
+// Output encoding
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Output format selection.
 pub mod output_type;
+
+/// Shared encoder trait definitions.
 pub mod segment_encoder;
 
-// Output encoders that serialize segments into various formats.
+/// JSON array encoder.
 pub mod json_array_encoder;
+
+/// WebVTT encoder.
 pub mod vtt_encoder;
 
-// Logging configuration and control.
-pub mod logging;
+// ─────────────────────────────────────────────────────────────────────────────
+// Infrastructure
+// ─────────────────────────────────────────────────────────────────────────────
 
-pub mod decoder;
+/// Logging configuration and control.
+pub mod logging;
