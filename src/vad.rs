@@ -211,6 +211,8 @@ pub struct VadPolicy {
 
     /// Merge adjacent segments if the gap between them is <= this duration.
     pub gap_merge_ms: u32,
+
+    pub non_speech_gain: f32,
 }
 
 /// Whisper-friendly, conservative policy.
@@ -219,9 +221,10 @@ pub struct VadPolicy {
 /// - generous padding reduces clipped words
 /// - small gap merge reduces over-fragmentation
 pub const DEFAULT_VAD_POLICY: VadPolicy = VadPolicy {
-    threshold: 0.25,
-    pre_pad_ms: 400,
-    post_pad_ms: 700,
-    min_speech_ms: 60,
-    gap_merge_ms: 250,
+    threshold: 0.2,
+    pre_pad_ms: 600,
+    post_pad_ms: 1200,
+    min_speech_ms: 40,
+    gap_merge_ms: 500,
+    non_speech_gain: 0.1,
 };
