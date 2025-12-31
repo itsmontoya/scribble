@@ -33,3 +33,5 @@ pub mod vtt_encoder;
 
 // Logging configuration and control.
 pub mod logging;
+
+pub mod decoder;

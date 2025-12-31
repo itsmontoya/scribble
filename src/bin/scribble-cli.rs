@@ -1,7 +1,9 @@
-use anyhow::Result;
+// src/bin/scribble-cli.rs
+
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::fs::File;
-use std::io;
+use std::io::{self, Read};
 
 use scribble::opts::Opts;
 use scribble::output_type::OutputType;
@@ -11,37 +13,62 @@ fn main() -> Result<()> {
     let params = Params::parse();
 
     // Map CLI flags into library options.
-    // This keeps the library reusable and the CLI thin.
+    //
+    // Keeping this mapping explicit helps:
+    // - keep the library reusable (Opts is the contract)
+    // - keep the CLI thin (just parsing + wiring)
     let opts = Opts {
         enable_translate_to_english: params.enable_translation_to_english,
         enable_voice_activity_detection: params.enable_voice_activity_detection,
-
-        // If this is `None`, we allow Whisper to auto-detect language.
         language: params.language,
-
         output_type: params.output_type,
     };
 
-    // Load the Whisper model (expensive) and prepare for transcription.
+    // Load the Whisper + VAD models (expensive).
+    //
+    // `Scribble::new` validates the VAD model path, so once this succeeds,
+    // we know VAD is available whenever it is enabled via `Opts`.
     let mut scribble = Scribble::new(params.model_path, params.vad_model_path)?;
 
-    // `File` implements `Read + Seek`, which our WAV reader requires.
-    let input = File::open(&params.audio_path)?;
+    // Open an input source.
+    // - File path → open directly.
+    // - "-"       → stream stdin.
+    //
+    // Note: we pass `io::stdin()` (not `stdin().lock()`) to avoid non-Send lock guards.
+    let input = open_input(&params.input)?;
 
-    // Stream transcription output directly to stdout.
-    scribble.transcribe(input, io::stdout(), &opts)?;
+    // Stream transcription output to stdout.
+    scribble
+        .transcribe(input, io::stdout(), &opts)
+        .context("transcription failed")?;
 
     Ok(())
 }
 
-/// CLI parameters for `scribble`.
+/// Open an input source as a boxed reader.
 ///
-/// We keep these flags explicit and well-documented so usage is self-explanatory.
+/// We return `Box<dyn Read + Send + Sync>` because the decoder pipeline may require
+/// those bounds for its internal threading/ownership model.
+///
+/// For stdin:
+/// - We use `io::stdin()` directly (not a lock guard).
+/// - This stays streaming-friendly and avoids temp files.
+fn open_input(path: &str) -> Result<Box<dyn Read + Send + Sync>> {
+    if path == "-" {
+        Ok(Box::new(io::stdin()))
+    } else {
+        let file =
+            File::open(path).with_context(|| format!("failed to open input file: {path}"))?;
+        Ok(Box::new(file))
+    }
+}
+
+/// CLI parameters for `scribble`.
 #[derive(Parser, Debug)]
 #[command(name = "scribble")]
-#[command(about = "A transcription CLI")]
+#[command(about = "A transcription CLI (audio or video input)")]
 struct Params {
-    /// Path to a whisper.cpp model file (e.g. `ggml-base.en.bin`).
+    /// Path to a whisper.cpp model file (e.g. `ggml-large-v3.bin`).
     #[arg(short = 'm', long = "model", required = true)]
     pub model_path: String,
 
@@ -49,9 +76,13 @@ struct Params {
     #[arg(short = 'v', long = "vad-model", required = true)]
     pub vad_model_path: String,
 
-    /// Path to a mono 16kHz WAV file to transcribe.
-    #[arg(short = 'a', long = "audio", required = true)]
-    pub audio_path: String,
+    /// Input media path (audio or video), or "-" to read from stdin.
+    ///
+    /// Examples:
+    ///   scribble -i samples/sintel_trailer-480p.mp4 ...
+    ///   cat samples/audio.mp3 | scribble -i - ...
+    #[arg(short = 'i', long = "input", required = true)]
+    pub input: String,
 
     /// Output format for transcription segments.
     #[arg(
@@ -62,7 +93,7 @@ struct Params {
     )]
     pub output_type: OutputType,
 
-    /// Enable voice activity detection (VAD) to suppress non-speech regions.
+    /// Enable voice activity detection (VAD).
     #[arg(long = "enable-vad", default_value_t = false)]
     pub enable_voice_activity_detection: bool,
 
@@ -74,7 +105,7 @@ struct Params {
     )]
     pub enable_translation_to_english: bool,
 
-    /// Optional language hint (e.g. "en", "es"). If omitted, Whisper will auto-detect.
+    /// Optional language hint (e.g. "en", "es").
     #[arg(short = 'l', long = "language")]
     pub language: Option<String>,
 }
