@@ -10,7 +10,7 @@
 //! - We normalize to interleaved `f32`, downmix to mono, then resample to 16 kHz if needed.
 //! - We emit fixed-size chunks to a `SamplesSink` so callers can process incrementally.
 
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 
 use anyhow::{Context, Result, anyhow, bail};
 use rubato::{Resampler, SincFixedIn, WindowFunction};
@@ -58,22 +58,6 @@ impl Default for StreamDecodeOpts {
             hint_extension: None,
         }
     }
-}
-
-/// Decode a seekable reader and emit Whisper-friendly chunks into `sink`.
-///
-/// This is the most compatible mode for "random media files", especially formats
-/// that rely on metadata at the end (some MP4/MOV layouts).
-pub fn decode_to_whisper_stream_from_reader<R>(
-    reader: R,
-    opts: StreamDecodeOpts,
-    sink: &mut dyn SamplesSink,
-) -> Result<()>
-where
-    R: Read + Seek + Send + Sync + 'static,
-{
-    let source = ReadSeekMediaSource::new(reader)?;
-    decode_impl(Box::new(source), opts, sink)
 }
 
 /// Decode an unseekable stream and emit Whisper-friendly chunks into `sink`.
@@ -140,53 +124,6 @@ impl DecodeState {
             mono_src_acc: Vec::new(),
             resample_in_chan: Vec::new(),
         }
-    }
-}
-
-/// A `MediaSource` wrapper for `Read + Seek` inputs.
-///
-/// Symphonia probing can behave differently depending on whether the source is marked
-/// seekable and whether `byte_len()` is known. For file-like sources, it's often helpful
-/// to provide a length when possible.
-struct ReadSeekMediaSource<R> {
-    inner: R,
-    len: Option<u64>,
-}
-
-impl<R> ReadSeekMediaSource<R> {
-    fn new(mut inner: R) -> Result<Self>
-    where
-        R: Seek,
-    {
-        // Best-effort: get byte length and restore cursor.
-        let cur = inner.seek(SeekFrom::Current(0)).ok();
-        let end = inner.seek(SeekFrom::End(0)).ok();
-        if let Some(cur) = cur {
-            let _ = inner.seek(SeekFrom::Start(cur));
-        }
-        Ok(Self { inner, len: end })
-    }
-}
-
-impl<R: Read> Read for ReadSeekMediaSource<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.inner.read(buf)
-    }
-}
-
-impl<R: Seek> Seek for ReadSeekMediaSource<R> {
-    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        self.inner.seek(pos)
-    }
-}
-
-impl<R: Read + Seek + Send + Sync> MediaSource for ReadSeekMediaSource<R> {
-    fn is_seekable(&self) -> bool {
-        true
-    }
-
-    fn byte_len(&self) -> Option<u64> {
-        self.len
     }
 }
 
