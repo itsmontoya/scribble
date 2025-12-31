@@ -35,6 +35,13 @@ pub struct AudioPipeline {
     resample_out_chan: Vec<f32>,
 }
 
+/// Creates an empty audio pipeline with no buffered samples or initialized resampler.
+impl Default for AudioPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AudioPipeline {
     /// Create a new audio pipeline with empty internal buffers.
     pub fn new() -> Self {
