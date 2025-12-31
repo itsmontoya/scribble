@@ -19,10 +19,9 @@ use anyhow::{Context, Result, ensure};
 use hound::WavSpec;
 use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
 
+use crate::audio_pipeline::WHISPER_SAMPLE_RATE;
 use crate::ctx::get_context;
-use crate::decoder::{
-    SamplesSink, StreamDecodeOpts, WHISPER_SAMPLE_RATE, decode_to_whisper_stream_from_read,
-};
+use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_whisper_stream_from_read};
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::logging::init_whisper_logging;
 use crate::opts::Opts;
