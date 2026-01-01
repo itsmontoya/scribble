@@ -4,27 +4,21 @@ use anyhow::{Result, anyhow};
 use hound::WavSpec;
 use whisper_rs::{WhisperVadContext, WhisperVadParams, WhisperVadSegments};
 
-/// Run VAD to identify speech segments, then replace the sample buffer with speech-only audio.
+/// Voice Activity Detection (VAD) helpers.
 ///
-/// What this does:
-/// - Runs VAD on the input buffer and gets a list of speech time ranges.
-/// - Applies a policy (padding, minimum duration, and gap merging).
-/// - Concatenates only the speech regions into a new buffer.
-/// - Replaces `samples` with that speech-only buffer.
+/// Current behavior:
+/// - Run VAD to identify speech time ranges.
+/// - Convert those ranges into sample index ranges (with padding / filtering / merging).
+/// - Keep the original buffer length.
+/// - Apply a gain to **non-speech** regions (0.0 = mute, 1.0 = unchanged).
 ///
-/// Return value:
-/// - `Ok(true)`  => at least one speech segment survived filtering and `samples` was replaced
-/// - `Ok(false)` => no speech was detected (or everything was filtered out)
-///
-/// Design note:
-/// - This *does* change buffer length (unlike our "zero-out non-speech" approach).
-/// - That means timestamps from Whisper will refer to the new, speech-only timeline.
-///   That's fine for "just get me the words" pipelines, but not ideal if you need
-///   timestamps aligned to the original media.
+/// Why this design:
+/// - Preserves timeline alignment with the original media (useful for timestamps).
+/// - Lets you keep faint room tone if desired (via `non_speech_gain`).
 pub fn to_speech_only(
     ctx: &mut WhisperVadContext,
     spec: &WavSpec,
-    samples: &mut Vec<f32>,
+    samples: &mut [f32],
 ) -> Result<bool> {
     to_speech_only_with_policy(ctx, spec, samples, DEFAULT_VAD_POLICY)
 }
@@ -33,47 +27,47 @@ pub fn to_speech_only(
 pub fn to_speech_only_with_policy(
     ctx: &mut WhisperVadContext,
     spec: &WavSpec,
-    samples: &mut Vec<f32>,
+    samples: &mut [f32],
     policy: VadPolicy,
 ) -> Result<bool> {
     // Build VAD parameters from defaults and apply our policy knobs.
     let mut vad_params = WhisperVadParams::default();
 
-    // We cap max speech duration to keep VAD from producing extremely long segments.
+    // Cap max speech duration to avoid producing extremely long segments.
     // (This value is in milliseconds in whisper_rs.)
     vad_params.set_max_speech_duration(15_000.0);
 
     // Some whisper_rs versions expose these setters. If yours doesn't, remove them
-    // and keep the filtering logic in `extract_speech_with_policy`.
+    // and keep filtering logic in `speech_ranges_with_policy`.
     vad_params.set_threshold(policy.threshold);
     vad_params.set_min_speech_duration(policy.min_speech_ms as i32);
 
     // Run VAD to produce segments from our sample buffer.
     let segments = ctx.segments_from_samples(vad_params, samples)?;
 
-    // Extract speech windows (with padding/merge policy) and replace the full buffer.
-    let Some(speech_only) = extract_speech_with_policy(spec, &segments, samples, policy)? else {
+    // Convert segments -> merged/filtered/padded sample ranges.
+    let Some(ranges) = speech_ranges_with_policy(spec, &segments, samples, policy)? else {
         return Ok(false);
     };
 
-    *samples = speech_only;
-    Ok(!samples.is_empty())
+    // Attenuate non-speech regions in-place (preserves buffer length).
+    apply_non_speech_gain_in_place(samples, &ranges, policy.non_speech_gain);
+    Ok(true)
 }
 
-/// Extract speech samples from `samples` according to `segments` and `policy`.
+/// Compute speech ranges (sample indices) according to `segments` and `policy`.
 ///
 /// Returns:
-/// - `Ok(Some(vec))` when one or more ranges are selected
+/// - `Ok(Some(ranges))` when one or more ranges are selected
 /// - `Ok(None)` when no ranges are selected
-fn extract_speech_with_policy(
+fn speech_ranges_with_policy(
     spec: &WavSpec,
     segments: &WhisperVadSegments,
     samples: &[f32],
     policy: VadPolicy,
-) -> Result<Option<Vec<f32>>> {
+) -> Result<Option<Vec<(usize, usize)>>> {
     let n = segments.num_segments();
     if n == 0 {
-        // No speech detected.
         return Ok(None);
     }
 
@@ -125,17 +119,53 @@ fn extract_speech_with_policy(
         return Ok(None);
     }
 
-    // Build the concatenated output buffer.
-    //
-    // We precompute capacity to minimize reallocations while we extend.
-    let total_len: usize = ranges.iter().map(|(s, e)| e - s).sum();
-    let mut out = Vec::with_capacity(total_len);
+    Ok(Some(ranges))
+}
 
-    for (s, e) in ranges {
-        out.extend_from_slice(&samples[s..e]);
+/// Apply gain to non-speech regions in-place, keeping speech untouched.
+///
+/// - `ranges` must be sorted and non-overlapping (the builder guarantees this).
+/// - `gain` is clamped to [0.0, 1.0]
+fn apply_non_speech_gain_in_place(samples: &mut [f32], ranges: &[(usize, usize)], gain: f32) {
+    let gain = gain.clamp(0.0, 1.0);
+
+    // If gain == 1.0, no change needed.
+    if (gain - 1.0).abs() < f32::EPSILON {
+        return;
     }
 
-    Ok(Some(out))
+    let mut cursor = 0usize;
+
+    for &(s, e) in ranges {
+        // Defensively clamp to the buffer in case callers ever pass bad ranges.
+        let s = s.min(samples.len());
+        let e = e.min(samples.len());
+
+        // Attenuate the gap before speech.
+        if s > cursor {
+            scale_samples(&mut samples[cursor..s], gain);
+        }
+
+        // Advance cursor to the end of this speech region.
+        cursor = cursor.max(e);
+    }
+
+    // Attenuate everything after the last speech segment.
+    if cursor < samples.len() {
+        scale_samples(&mut samples[cursor..], gain);
+    }
+}
+
+/// Multiply all samples by a gain factor.
+fn scale_samples(buf: &mut [f32], gain: f32) {
+    if gain == 0.0 {
+        buf.fill(0.0);
+        return;
+    }
+
+    for s in buf.iter_mut() {
+        *s *= gain;
+    }
 }
 
 /// Convert milliseconds → number of samples at `sample_rate`.
@@ -171,7 +201,7 @@ fn segment_sample_indexes(
         .get_segment_end_timestamp(i)
         .ok_or_else(|| anyhow!("missing end timestamp for VAD segment {i}"))?;
 
-    // Convert to seconds.
+    // Convert to seconds. (centiseconds = 1/100s)
     let start_sec = start_cs / 100.0;
     let end_sec = end_cs / 100.0;
 
@@ -191,7 +221,7 @@ fn segment_sample_indexes(
     Ok((start_idx, end_idx))
 }
 
-/// Policy knobs for speech extraction.
+/// Policy knobs for VAD range selection and non-speech handling.
 ///
 /// These values are intentionally simple and expressed in human-friendly units (ms),
 /// and are converted to sample counts using the current WAV sample rate.
@@ -211,6 +241,9 @@ pub struct VadPolicy {
 
     /// Merge adjacent segments if the gap between them is <= this duration.
     pub gap_merge_ms: u32,
+
+    /// Multiply non-speech audio by this gain factor (0.0 = mute).
+    pub non_speech_gain: f32,
 }
 
 /// Whisper-friendly, conservative policy.
@@ -219,9 +252,10 @@ pub struct VadPolicy {
 /// - generous padding reduces clipped words
 /// - small gap merge reduces over-fragmentation
 pub const DEFAULT_VAD_POLICY: VadPolicy = VadPolicy {
-    threshold: 0.25,
-    pre_pad_ms: 400,
-    post_pad_ms: 700,
-    min_speech_ms: 60,
-    gap_merge_ms: 250,
+    threshold: 0.2,
+    pre_pad_ms: 600,
+    post_pad_ms: 1200,
+    min_speech_ms: 40,
+    gap_merge_ms: 500,
+    non_speech_gain: 0.1,
 };

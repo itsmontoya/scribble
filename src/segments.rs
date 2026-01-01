@@ -78,12 +78,13 @@ pub fn write_segments(
 /// Convert a `WhisperSegment` from whisper.rs into our serializable `Segment` type.
 ///
 /// Notes:
-/// - whisper timestamps are milliseconds, so we convert to seconds for output.
-/// - whisper returns text via `to_str()`, which can fail, so we attach context.
+/// - whisper timestamps are centiseconds (1/100s), so we convert to seconds for output.
+/// - whisper returns text via `to_str()`, which can fail due to UTF-8 conversion,
+///   so we attach context for better error reporting.
 pub fn to_segment(segment: WhisperSegment) -> Result<Segment> {
-    // ms → seconds (whisper timestamps are milliseconds)
-    let start_seconds = segment.start_timestamp() as f32 / 1000.0;
-    let end_seconds = segment.end_timestamp() as f32 / 1000.0;
+    // cs → seconds (whisper timestamps are centiseconds)
+    let start_seconds = segment.start_timestamp() as f32 / 100.0;
+    let end_seconds = segment.end_timestamp() as f32 / 100.0;
 
     let text = segment
         .to_str()
