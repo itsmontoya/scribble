@@ -4,6 +4,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperSegment, W
 
 use crate::opts::Opts;
 use crate::segment_encoder::SegmentEncoder;
+use crate::token::{Token, tokens_from_segment};
 
 /// A single transcription segment produced by Whisper.
 ///
@@ -16,6 +17,12 @@ pub struct Segment {
     pub start_seconds: f32,
     pub end_seconds: f32,
     pub text: String,
+
+    /// Tokens that make up this segment.
+    ///
+    /// We include token-level timing and probabilities so consumers can build
+    /// detailed overlays or custom renderers without re-tokenizing.
+    pub tokens: Vec<Token>,
 
     /// Language of the segment as a short code (e.g. "en", "es").
     ///
@@ -91,10 +98,13 @@ pub fn to_segment(segment: WhisperSegment) -> Result<Segment> {
         .context("failed to get segment text")?
         .to_owned();
 
+    let tokens = tokens_from_segment(&segment)?;
+
     Ok(Segment {
         start_seconds,
         end_seconds,
         text,
+        tokens,
         language_code: DEFAULT_LANGUAGE_CODE.to_owned(),
     })
 }
