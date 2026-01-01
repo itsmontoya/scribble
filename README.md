@@ -1,4 +1,9 @@
-# Scribble
+# Scribble &emsp; [![Build Status]][actions] [![Latest Version]][crates.io]
+
+[Build Status]: https://img.shields.io/github/actions/workflow/status/itsmontoya/scribble/ci.yml?branch=master
+[actions]: https://github.com/itsmontoya/scribble/actions?query=branch%3Amaster
+[Latest Version]: https://img.shields.io/crates/v/scribble.svg
+[crates.io]: https://crates.io/crates/scribble
 
 Scribble is a fast, lightweight transcription engine written in Rust, built on top of Whisper and designed for both CLI and webserver use.
 
