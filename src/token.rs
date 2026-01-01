@@ -19,11 +19,14 @@ pub struct Token {
 /// Extract tokens (with timing and probabilities) from a Whisper segment.
 pub fn tokens_from_segment(segment: &WhisperSegment) -> Result<Vec<Token>> {
     let token_count = segment.n_tokens();
-    let mut tokens = Vec::with_capacity(token_count as usize);
+    let token_count_usize = usize::try_from(token_count)
+        .with_context(|| format!("segment reported negative token count: {token_count}"))?;
+    let mut tokens = Vec::with_capacity(token_count_usize);
 
-    for token_idx in 0..token_count {
+    for token_idx in 0..token_count_usize {
+        let token_idx_i32 = token_idx as i32;
         let token = segment
-            .get_token(token_idx)
+            .get_token(token_idx_i32)
             .context("failed to get token from segment")?;
 
         let data = token.token_data();
@@ -44,6 +47,6 @@ pub fn tokens_from_segment(segment: &WhisperSegment) -> Result<Vec<Token>> {
     Ok(tokens)
 }
 
-fn centiseconds_to_seconds(value: i64) -> f32 {
+pub(crate) fn centiseconds_to_seconds(value: i64) -> f32 {
     if value < 0 { 0.0 } else { value as f32 / 100.0 }
 }
