@@ -29,6 +29,12 @@ pub struct Segment {
     /// Today we default this because we are not yet running per-segment language detection.
     /// When we add language detection, we can populate this field more accurately.
     pub language_code: String,
+
+    /// True if the next segment begins a new speaker turn.
+    ///
+    /// Populated from `WhisperSegment::next_segment_speaker_turn()` so downstream
+    /// encoders/UIs can insert speaker breaks without re-deriving this signal.
+    pub next_speaker_turn: bool,
 }
 
 /// Our current placeholder language code.
@@ -112,6 +118,7 @@ pub fn to_segment(segment: WhisperSegment) -> Result<Segment> {
         text,
         tokens,
         language_code: DEFAULT_LANGUAGE_CODE.to_owned(),
+        next_speaker_turn: segment.next_segment_speaker_turn(),
     })
 }
 
