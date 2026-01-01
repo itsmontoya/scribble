@@ -97,7 +97,7 @@ struct Params {
     #[arg(long = "enable-vad", default_value_t = false)]
     pub enable_voice_activity_detection: bool,
 
-    /// Translate speech to English (not wired into the transcription pipeline yet).
+    /// Translate speech to English.
     #[arg(
         short = 't',
         long = "enable-translation-to-english",
