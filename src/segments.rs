@@ -4,6 +4,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperSegment, W
 
 use crate::opts::Opts;
 use crate::segment_encoder::SegmentEncoder;
+use crate::token::{Token, centiseconds_to_seconds, tokens_from_segment};
 
 /// A single transcription segment produced by Whisper.
 ///
@@ -16,6 +17,12 @@ pub struct Segment {
     pub start_seconds: f32,
     pub end_seconds: f32,
     pub text: String,
+
+    /// Tokens that make up this segment.
+    ///
+    /// We include token-level timing and probabilities so consumers can build
+    /// detailed overlays or custom renderers without re-tokenizing.
+    pub tokens: Vec<Token>,
 
     /// Language of the segment as a short code (e.g. "en", "es").
     ///
@@ -56,7 +63,13 @@ pub fn write_segments(
     let mut first_err: Option<anyhow::Error> = None;
 
     for whisper_segment in state.as_iter() {
-        let segment = to_segment(whisper_segment)?;
+        let segment = match to_segment(whisper_segment) {
+            Ok(segment) => segment,
+            Err(err) => {
+                first_err = Some(err);
+                break;
+            }
+        };
 
         if let Err(err) = encoder.write_segment(&segment) {
             first_err = Some(err);
@@ -83,18 +96,21 @@ pub fn write_segments(
 ///   so we attach context for better error reporting.
 pub fn to_segment(segment: WhisperSegment) -> Result<Segment> {
     // cs → seconds (whisper timestamps are centiseconds)
-    let start_seconds = segment.start_timestamp() as f32 / 100.0;
-    let end_seconds = segment.end_timestamp() as f32 / 100.0;
+    let start_seconds = centiseconds_to_seconds(segment.start_timestamp());
+    let end_seconds = centiseconds_to_seconds(segment.end_timestamp());
 
     let text = segment
         .to_str()
         .context("failed to get segment text")?
         .to_owned();
 
+    let tokens = tokens_from_segment(&segment)?;
+
     Ok(Segment {
         start_seconds,
         end_seconds,
         text,
+        tokens,
         language_code: DEFAULT_LANGUAGE_CODE.to_owned(),
     })
 }
@@ -135,6 +151,9 @@ fn build_full_params<'a>(o: &'a Opts) -> FullParams<'a, 'a> {
     params.set_print_special(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
+
+    // Enable per-token timestamps so we can surface token-level timing.
+    params.set_token_timestamps(true);
 
     params
 }
