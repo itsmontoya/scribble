@@ -4,7 +4,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperSegment, W
 
 use crate::opts::Opts;
 use crate::segment_encoder::SegmentEncoder;
-use crate::token::{Token, tokens_from_segment};
+use crate::token::{Token, centiseconds_to_seconds, tokens_from_segment};
 
 /// A single transcription segment produced by Whisper.
 ///
@@ -63,7 +63,13 @@ pub fn write_segments(
     let mut first_err: Option<anyhow::Error> = None;
 
     for whisper_segment in state.as_iter() {
-        let segment = to_segment(whisper_segment)?;
+        let segment = match to_segment(whisper_segment) {
+            Ok(segment) => segment,
+            Err(err) => {
+                first_err = Some(err);
+                break;
+            }
+        };
 
         if let Err(err) = encoder.write_segment(&segment) {
             first_err = Some(err);
@@ -90,8 +96,8 @@ pub fn write_segments(
 ///   so we attach context for better error reporting.
 pub fn to_segment(segment: WhisperSegment) -> Result<Segment> {
     // cs → seconds (whisper timestamps are centiseconds)
-    let start_seconds = segment.start_timestamp() as f32 / 100.0;
-    let end_seconds = segment.end_timestamp() as f32 / 100.0;
+    let start_seconds = centiseconds_to_seconds(segment.start_timestamp());
+    let end_seconds = centiseconds_to_seconds(segment.end_timestamp());
 
     let text = segment
         .to_str()
