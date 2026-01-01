@@ -1,7 +1,7 @@
 # Scribble &emsp; [![Build Status]][actions] [![Latest Version]][crates.io]
 
 [Build Status]: https://img.shields.io/github/actions/workflow/status/itsmontoya/scribble/ci.yml?branch=main
-[actions]: https://github.com/itsmontoya/scribble/actions?query=branch%3Amaster
+[actions]: https://github.com/itsmontoya/scribble/actions?query=branch%3Amain
 [Latest Version]: https://img.shields.io/crates/v/scribble.svg
 [crates.io]: https://crates.io/crates/scribble
 
