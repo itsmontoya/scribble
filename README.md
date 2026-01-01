@@ -11,10 +11,14 @@ Scribble is a fast, lightweight transcription engine written in Rust, built on t
 
 ## Goals
 
-- Provide a clean, idiomatic Rust API for audio transcription
-- Support multiple output formats (JSON, VTT, plain text, etc.)
-- Work equally well as a CLI tool or embedded service
-- Keep the core simple, explicit, and easy to extend
+- Provide a clean, idiomatic Rust API for audio transcription  
+- Support multiple output formats (JSON, VTT, plain text, etc.)  
+- Work equally well as a CLI tool or embedded service  
+- **Be streaming-first:** designed to support incremental, chunk-based transcription pipelines (live audio, long-running streams, and low-latency workflows)  
+- **Enable composable pipelines:** VAD → transcription → encoding, with clear extension points for streaming and real-time use cases  
+- Keep the core simple, explicit, and easy to extend  
+
+> Scribble is built with **streaming and real-time transcription** in mind, even when operating on static files today.
 
 ## Installation
 
