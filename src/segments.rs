@@ -146,6 +146,9 @@ fn build_full_params<'a>(o: &'a Opts) -> FullParams<'a, 'a> {
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
 
+    // Enable per-token timestamps so we can surface token-level timing.
+    params.set_token_timestamps(true);
+
     params
 }
 
