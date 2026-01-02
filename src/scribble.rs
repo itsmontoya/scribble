@@ -22,10 +22,12 @@ use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
 use crate::audio_pipeline::WHISPER_SAMPLE_RATE;
 use crate::ctx::get_context;
 use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_whisper_stream_from_read};
+use crate::incremental::BufferedSegmentTranscriber;
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::logging::init_whisper_logging;
 use crate::opts::Opts;
 use crate::output_type::OutputType;
+use crate::segment_encoder::SegmentEncoder;
 use crate::segments::write_segments;
 use crate::vad::to_speech_only;
 use crate::vtt_encoder::VttEncoder;
@@ -111,38 +113,6 @@ impl Scribble {
         R: Read + Send + Sync + 'static,
         W: Write,
     {
-        // We decode into a `Vec<f32>` because Whisper wants a contiguous sample buffer.
-        // (If we later add incremental/streaming Whisper, we'll revisit this.)
-        let mut samples = Vec::<f32>::new();
-        let mut sink = VecSamplesSink::new(&mut samples);
-
-        // Decode any supported input into Whisper-compatible samples (mono, 16kHz).
-        // The decoder pushes chunks into our sink via `on_samples`.
-        decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)?;
-
-        // If decoding produced no audio, we exit successfully with no output.
-        if samples.is_empty() {
-            return Ok(());
-        }
-
-        // We construct a minimal `WavSpec` for downstream code that relies on sample rate.
-        // Since the decoder guarantees mono 16kHz output, we can hardcode these fields.
-        let spec = WavSpec {
-            channels: 1,
-            sample_rate: WHISPER_SAMPLE_RATE,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-
-        // Optionally apply VAD by extracting padded speech windows and concatenating them.
-        // If VAD finds no speech, we exit successfully with no output.
-        if opts.enable_voice_activity_detection {
-            let found_speech = to_speech_only(&mut self.vad_ctx, &spec, &mut samples)?;
-            if !found_speech {
-                return Ok(());
-            }
-        }
-
         // Buffer output for efficiency (especially important for stdout).
         let writer = BufWriter::new(w);
 
@@ -151,15 +121,39 @@ impl Scribble {
         match opts.output_type {
             OutputType::Json => {
                 let mut encoder = JsonArrayEncoder::new(writer);
-                write_segments(&self.ctx, opts, &mut encoder, &samples)?;
+                let run_res = self.transcribe_with_encoder(r, opts, &mut encoder);
+                merge_run_and_close(run_res, encoder.close())
             }
             OutputType::Vtt => {
                 let mut encoder = VttEncoder::new(writer);
-                write_segments(&self.ctx, opts, &mut encoder, &samples)?;
+                let run_res = self.transcribe_with_encoder(r, opts, &mut encoder);
+                merge_run_and_close(run_res, encoder.close())
             }
         }
+    }
 
-        Ok(())
+    fn transcribe_with_encoder<R, E>(&mut self, r: R, opts: &Opts, encoder: &mut E) -> Result<()>
+    where
+        R: Read + Send + Sync + 'static,
+        E: SegmentEncoder,
+    {
+        if opts.enable_voice_activity_detection {
+            let mut samples = decode_all_samples(r)?;
+            if samples.is_empty() {
+                return Ok(());
+            }
+
+            let spec = whisper_wav_spec();
+            let found_speech = to_speech_only(&mut self.vad_ctx, &spec, &mut samples)?;
+            if found_speech {
+                write_segments(&self.ctx, opts, encoder, &samples)?;
+            }
+            return Ok(());
+        }
+
+        let mut transcriber = BufferedSegmentTranscriber::new(&self.ctx, opts, encoder);
+        decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut transcriber)?;
+        transcriber.finish()
     }
 
     /// Access the underlying Whisper context.
@@ -206,5 +200,33 @@ impl<'a> SamplesSink for VecSamplesSink<'a> {
         // We append chunks as they arrive. This preserves ordering and builds the full buffer.
         self.out.extend_from_slice(samples_16k_mono);
         Ok(true)
+    }
+}
+
+fn whisper_wav_spec() -> WavSpec {
+    WavSpec {
+        channels: 1,
+        sample_rate: WHISPER_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    }
+}
+
+fn decode_all_samples<R>(r: R) -> Result<Vec<f32>>
+where
+    R: Read + Send + Sync + 'static,
+{
+    let mut samples = Vec::<f32>::new();
+    let mut sink = VecSamplesSink::new(&mut samples);
+    decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)?;
+    Ok(samples)
+}
+
+fn merge_run_and_close(run_res: Result<()>, close_res: Result<()>) -> Result<()> {
+    match (run_res, close_res) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(close_err)) => Err(close_err),
+        (Err(err), Ok(())) => Err(err),
+        (Err(err), Err(close_err)) => Err(err.context(close_err)),
     }
 }
