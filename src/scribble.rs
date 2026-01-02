@@ -138,6 +138,14 @@ impl Scribble {
         E: SegmentEncoder,
     {
         if opts.enable_voice_activity_detection {
+            // NOTE: VAD is currently **not** supported in the streaming/incremental flow.
+            //
+            // Today we run VAD by decoding the *entire* input into a contiguous buffer,
+            // applying VAD in-place, then running a single Whisper pass.
+            //
+            // Follow-up: rework VAD into a streaming-friendly “middleware” (Read -> Read, or
+            // chunk/sink based) so VAD-enabled transcription can share the same incremental
+            // pipeline as the non-VAD path.
             let mut samples = decode_all_samples(r)?;
             if samples.is_empty() {
                 return Ok(());
