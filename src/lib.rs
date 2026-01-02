@@ -27,6 +27,12 @@
 /// User-facing transcription entry point and orchestration logic.
 pub mod scribble;
 
+/// Pluggable ASR backend trait.
+pub mod backend;
+
+/// Built-in backend implementations.
+pub mod backends;
+
 /// User-configurable transcription options.
 pub mod opts;
 
