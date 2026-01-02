@@ -22,6 +22,8 @@ use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
 
 use crate::audio_pipeline::WHISPER_SAMPLE_RATE;
 use crate::backend::{Backend, BackendStream};
+#[cfg(feature = "silero-onnx")]
+use crate::backends::silero::SileroBackend;
 use crate::backends::whisper::WhisperBackend;
 use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_whisper_stream_from_read};
 use crate::json_array_encoder::JsonArrayEncoder;
@@ -66,6 +68,18 @@ impl Scribble<WhisperBackend> {
     /// This is primarily intended for advanced or experimental use-cases.
     pub fn context(&self) -> &WhisperContext {
         self.backend.context()
+    }
+}
+
+#[cfg(feature = "silero-onnx")]
+impl Scribble<SileroBackend> {
+    /// Create a new `Scribble` instance using the experimental Silero ONNX backend.
+    pub fn new_silero(
+        model_path: impl AsRef<str>,
+        vad_model_path: impl Into<String>,
+    ) -> Result<Self> {
+        let backend = SileroBackend::new(model_path.as_ref())?;
+        Self::with_backend(backend, vad_model_path)
     }
 }
 
