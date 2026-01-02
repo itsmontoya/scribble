@@ -17,20 +17,26 @@ concurrency:
 jobs:
   prepare:
     name: Prepare release bump PR
-    if: ${{ github.event.pull_request.merged == true }}
+    if: >
+      ${{
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.base.repo.full_name == github.repository
+      }}
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # IMPORTANT: use a PAT so the PR creation triggers other workflows (CI)
+          token: ${{ secrets.RELEASE_PR_TOKEN }}
 
       - name: Decide bump from PR labels (via API)
         id: decide
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          # IMPORTANT: use a PAT so API/PR actions are attributed to a real actor
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
@@ -96,7 +102,8 @@ jobs:
         if: steps.decide.outputs.do_release == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          # IMPORTANT: PAT so bump PR triggers CI workflows
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
         run: |
           set -euo pipefail
 
