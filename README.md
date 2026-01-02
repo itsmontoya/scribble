@@ -1,13 +1,15 @@
 # Scribble &emsp; [![Build Status]][actions] [![Latest Version]][crates.io]
 
-[Build Status]: https://img.shields.io/github/actions/workflow/status/itsmontoya/scribble/ci.yml?branch=main
-[actions]: https://github.com/itsmontoya/scribble/actions?query=branch%3Amaster
+[Build Status]: https://img.shields.io/github/actions/workflow/status/itsmontoya/scribble/ci.yaml?branch=main
+[actions]: https://github.com/itsmontoya/scribble/actions?query=branch%3Amain
 [Latest Version]: https://img.shields.io/crates/v/scribble.svg
 [crates.io]: https://crates.io/crates/scribble
 
 Scribble is a fast, lightweight transcription engine written in Rust, built on top of Whisper and designed for both CLI and webserver use.
 
 ![billboard](https://github.com/itsmontoya/scribble/blob/main/banner.png?raw=true "Scribble billboard")
+
+Scribble will demux/decode **audio *or* video containers** (MP4, MP3, WAV, FLAC, OGG, WebM, MKV, etc.), downmix to mono, and resample to Whisper’s expected 16 kHz — no preprocessing required.
 
 ## Goals
 
@@ -30,7 +32,7 @@ cargo build --release
 
 This will produce the following binaries:
 
-- `scribble-cli` — transcribe WAV files
+- `scribble-cli` — transcribe audio/video (decodes + normalizes to mono 16 kHz)
 - `model-downloader` — download Whisper and VAD models
 
 ## model-downloader
@@ -84,9 +86,9 @@ Downloads are performed safely:
 
 `scribble-cli` is the main transcription CLI.
 
-It expects:
+It accepts audio or video containers and normalizes them to Whisper’s required mono 16 kHz internally. Provide:
 
-- a **mono, 16 kHz WAV file**
+- an input media path (e.g. MP4, MP3, WAV, FLAC, OGG, WebM, MKV) or `-` to stream from stdin
 - a Whisper model
 - (optionally) a Whisper-VAD model
 
@@ -95,7 +97,7 @@ It expects:
 ```bash
 cargo run --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
-  --audio ./audio.wav
+  --input ./input.mp4
 ```
 
 Output is written to `stdout` in WebVTT format by default.
@@ -105,7 +107,7 @@ Output is written to `stdout` in WebVTT format by default.
 ```bash
 cargo run --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
-  --audio ./audio.wav \
+  --input ./input.wav \
   --output-type json
 ```
 
@@ -116,7 +118,7 @@ cargo run --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
   --vad-model ./models/ggml-silero-v6.2.0.bin \
   --enable-vad \
-  --audio ./audio.wav
+  --input ./input.wav
 ```
 
 When VAD is enabled:
@@ -129,7 +131,7 @@ When VAD is enabled:
 ```bash
 cargo run --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
-  --audio ./audio.wav \
+  --input ./input.wav \
   --language en
 ```
 
@@ -140,7 +142,7 @@ If `--language` is omitted, Whisper will auto-detect.
 ```bash
 cargo run --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
-  --audio ./audio.wav \
+  --input ./input.wav \
   --output-type vtt \
   > transcript.vtt
 ```

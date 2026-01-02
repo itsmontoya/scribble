@@ -39,6 +39,8 @@ pub mod ctx;
 
 /// Segment data structures and transcription helpers.
 pub mod segments;
+/// Token data structures.
+pub mod token;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio preprocessing pipeline
