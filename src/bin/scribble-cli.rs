@@ -22,6 +22,7 @@ fn main() -> Result<()> {
         enable_voice_activity_detection: params.enable_voice_activity_detection,
         language: params.language,
         output_type: params.output_type,
+        incremental_min_window_seconds: 3,
     };
 
     // Load the Whisper + VAD models (expensive).

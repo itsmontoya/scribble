@@ -54,6 +54,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
                 enable_voice_activity_detection: false,
                 language: None,
                 output_type: OutputType::Json,
+                incremental_min_window_seconds: 3,
             },
         ),
         (
@@ -63,6 +64,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
                 enable_voice_activity_detection: true,
                 language: None,
                 output_type: OutputType::Json,
+                incremental_min_window_seconds: 3,
             },
         ),
         (
@@ -72,6 +74,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
                 enable_voice_activity_detection: false,
                 language: Some("en".to_string()),
                 output_type: OutputType::Json,
+                incremental_min_window_seconds: 3,
             },
         ),
         (
@@ -81,6 +84,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
                 enable_voice_activity_detection: true,
                 language: Some("en".to_string()),
                 output_type: OutputType::Json,
+                incremental_min_window_seconds: 3,
             },
         ),
     ];

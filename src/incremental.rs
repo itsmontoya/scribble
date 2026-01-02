@@ -7,8 +7,6 @@
 //! - advances the buffer by that segment’s end timestamp
 
 use anyhow::{Context, Result, ensure};
-use std::sync::OnceLock;
-use std::time::Instant;
 use whisper_rs::WhisperContext;
 
 use crate::audio_pipeline::WHISPER_SAMPLE_RATE;
@@ -16,12 +14,6 @@ use crate::decoder::SamplesSink;
 use crate::opts::Opts;
 use crate::segment_encoder::SegmentEncoder;
 use crate::segments::{run_whisper_full, to_segment};
-
-/// Default minimum buffer duration before running Whisper.
-///
-/// This is intentionally conservative; the buffer grows until Whisper produces at least one
-/// segment, at which point we emit that segment and advance.
-const DEFAULT_MIN_BUFFER_SECONDS: usize = 1;
 
 /// Maximum buffer size before we force progress.
 ///
@@ -58,7 +50,8 @@ impl<'a> BufferedSegmentTranscriber<'a> {
         opts: &'a Opts,
         encoder: &'a mut dyn SegmentEncoder,
     ) -> Self {
-        let min_window_samples = WHISPER_SAMPLE_RATE as usize * DEFAULT_MIN_BUFFER_SECONDS;
+        let min_window_seconds = opts.incremental_min_window_seconds.max(1);
+        let min_window_samples = WHISPER_SAMPLE_RATE as usize * min_window_seconds;
         let max_window_samples = WHISPER_SAMPLE_RATE as usize * DEFAULT_MAX_BUFFER_SECONDS;
         Self {
             ctx,
@@ -122,22 +115,8 @@ impl<'a> BufferedSegmentTranscriber<'a> {
             return Ok(Progress::NoOp);
         }
 
-        let t0 = Instant::now();
-        if debug_incremental() {
-            eprintln!(
-                "[scribble][incremental] infer_start win_len={}samp advanced={}samp eos={} force_flush={}",
-                win_len, self.advanced_samples, end_of_stream, force_flush
-            );
-        }
         let state = run_whisper_full(self.ctx, self.opts, self.window())?;
         let n_segments_i32 = state.full_n_segments();
-        if debug_incremental() {
-            eprintln!(
-                "[scribble][incremental] infer_done elapsed_ms={} n_segments={}",
-                t0.elapsed().as_millis(),
-                n_segments_i32
-            );
-        }
         if n_segments_i32 <= 0 {
             if !force_flush {
                 self.no_progress_runs = self.no_progress_runs.saturating_add(1);
@@ -147,12 +126,6 @@ impl<'a> BufferedSegmentTranscriber<'a> {
                     self.max_window_samples,
                     self.no_progress_runs,
                 );
-                if debug_incremental() {
-                    eprintln!(
-                        "[scribble][incremental] no_progress runs={} next_infer_at={}samp",
-                        self.no_progress_runs, self.next_infer_at_samples
-                    );
-                }
             }
             return Ok(Progress::NoOp);
         }
@@ -171,12 +144,6 @@ impl<'a> BufferedSegmentTranscriber<'a> {
             0
         };
 
-        if debug_incremental() {
-            eprintln!(
-                "[scribble][incremental] finalize emit_count={} (n_segments={})",
-                emit_count, n_segments
-            );
-        }
         if emit_count == 0 {
             self.no_progress_runs = self.no_progress_runs.saturating_add(1);
             self.next_infer_at_samples = next_infer_threshold(
@@ -185,12 +152,6 @@ impl<'a> BufferedSegmentTranscriber<'a> {
                 self.max_window_samples,
                 self.no_progress_runs,
             );
-            if debug_incremental() {
-                eprintln!(
-                    "[scribble][incremental] no_progress runs={} next_infer_at={}samp",
-                    self.no_progress_runs, self.next_infer_at_samples
-                );
-            }
             return Ok(Progress::NoOp);
         }
 
@@ -212,13 +173,6 @@ impl<'a> BufferedSegmentTranscriber<'a> {
             .get_segment(last_emitted_idx as i32)
             .with_context(|| format!("whisper segment {last_emitted_idx} was missing"))?;
         let end_samples = segment_end_samples(last_emitted.end_timestamp(), win_len)?;
-        if debug_incremental() {
-            eprintln!(
-                "[scribble][incremental] advance end_samples={} new_advanced={}samp",
-                end_samples,
-                self.advanced_samples + end_samples
-            );
-        }
 
         if end_of_stream {
             // End-of-stream flush is a single inference pass: emit what Whisper produced and
@@ -256,11 +210,6 @@ impl SamplesSink for BufferedSegmentTranscriber<'_> {
 enum Progress {
     NoOp,
     Advanced,
-}
-
-fn debug_incremental() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("SCRIBBLE_DEBUG_INCREMENTAL").is_some())
 }
 
 fn next_infer_threshold(
