@@ -169,7 +169,11 @@ fn build_full_params<'a>(o: &'a Opts) -> FullParams<'a, 'a> {
 ///
 /// We return the `WhisperState` so callers can iterate segments without forcing us
 /// to allocate a separate list upfront.
-fn run_whisper_full(ctx: &WhisperContext, o: &Opts, samples: &[f32]) -> Result<WhisperState> {
+pub(crate) fn run_whisper_full(
+    ctx: &WhisperContext,
+    o: &Opts,
+    samples: &[f32],
+) -> Result<WhisperState> {
     let params = build_full_params(o);
 
     let mut state = ctx
