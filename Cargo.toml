@@ -27,3 +27,15 @@ reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }
 rubato = "0.16"
 symphonia = { version = "0.5", features = ["all"] }
 tempfile = "3"
+
+# Optional ONNX backend support (Silero ASR).
+#
+# We use ONNX Runtime via `ort` to support models that include ONNX control-flow ops.
+ort = { version = "2.0.0-rc.6", optional = true, features = ["ndarray", "download-binaries"] }
+
+[features]
+# Keep the default build lightweight (Whisper-only).
+default = []
+
+# Enable the experimental Silero ASR backend (ONNX via `tract-onnx`).
+silero-onnx = ["dep:ort"]
