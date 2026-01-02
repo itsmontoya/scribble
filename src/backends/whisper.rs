@@ -50,7 +50,10 @@ impl WhisperBackend {
 }
 
 impl Backend for WhisperBackend {
-    type Stream<'a> = WhisperStream<'a> where Self: 'a;
+    type Stream<'a>
+        = WhisperStream<'a>
+    where
+        Self: 'a;
 
     fn transcribe_full(
         &mut self,
@@ -58,7 +61,9 @@ impl Backend for WhisperBackend {
         encoder: &mut dyn SegmentEncoder,
         samples_16k_mono: &[f32],
     ) -> Result<()> {
-        emit_segments(&self.ctx, opts, samples_16k_mono, &mut |seg| encoder.write_segment(seg))
+        emit_segments(&self.ctx, opts, samples_16k_mono, &mut |seg| {
+            encoder.write_segment(seg)
+        })
     }
 
     fn create_stream<'a>(

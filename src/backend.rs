@@ -47,4 +47,3 @@ pub trait BackendStream: SamplesSink {
     /// Flush and emit any final segments.
     fn finish(&mut self) -> Result<()>;
 }
-
