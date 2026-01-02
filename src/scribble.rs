@@ -21,15 +21,14 @@ use hound::WavSpec;
 use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
 
 use crate::audio_pipeline::WHISPER_SAMPLE_RATE;
-use crate::ctx::get_context;
+use crate::backend::{Backend, BackendStream};
+use crate::backends::whisper::WhisperBackend;
 use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_whisper_stream_from_read};
-use crate::incremental::BufferedSegmentTranscriber;
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::logging::init_whisper_logging;
 use crate::opts::Opts;
 use crate::output_type::OutputType;
 use crate::segment_encoder::SegmentEncoder;
-use crate::segments::write_segments;
 use crate::vad::to_speech_only;
 use crate::vtt_encoder::VttEncoder;
 
@@ -46,18 +45,33 @@ use crate::vtt_encoder::VttEncoder;
 ///
 /// Note: `transcribe` takes `&mut self` because whisper_rs’s VAD context requires mutable access
 /// to run inference (`segments_from_samples` takes `&mut self`).
-pub struct Scribble {
-    ctx: WhisperContext,
+pub struct Scribble<B: Backend = WhisperBackend> {
+    backend: B,
     vad_model_path: String,
     vad_ctx: WhisperVadContext,
 }
 
-impl Scribble {
-    /// Create a new `Scribble` instance by loading Whisper + VAD models from disk.
+impl Scribble<WhisperBackend> {
+    /// Create a new `Scribble` instance using the built-in Whisper backend.
     ///
     /// We fail fast if the VAD model path is missing or invalid. This keeps invariants simple:
     /// once `Scribble::new` succeeds, we know VAD is available whenever enabled via `Opts`.
     pub fn new(model_path: impl AsRef<str>, vad_model_path: impl Into<String>) -> Result<Self> {
+        let backend = WhisperBackend::new(model_path)?;
+        Self::with_backend(backend, vad_model_path)
+    }
+
+    /// Access the underlying Whisper context (only available for the Whisper backend).
+    ///
+    /// This is primarily intended for advanced or experimental use-cases.
+    pub fn context(&self) -> &WhisperContext {
+        self.backend.context()
+    }
+}
+
+impl<B: Backend> Scribble<B> {
+    /// Create a new `Scribble` instance using a custom backend.
+    pub fn with_backend(backend: B, vad_model_path: impl Into<String>) -> Result<Self> {
         // We keep whisper logs quiet by default so callers fully control stdout/stderr.
         // This function is idempotent (safe to call multiple times).
         init_whisper_logging();
@@ -81,16 +95,13 @@ impl Scribble {
             vad_model_path
         );
 
-        // Load the Whisper model once (this is the expensive part).
-        let ctx = get_context(model_path.as_ref())?;
-
         // Load the VAD model once so repeated transcriptions don't re-initialize it.
         let vad_ctx_params = WhisperVadContextParams::default();
         let vad_ctx = WhisperVadContext::new(&vad_model_path, vad_ctx_params)
             .with_context(|| format!("failed to load VAD model from '{}'", vad_model_path))?;
 
         Ok(Self {
-            ctx,
+            backend,
             vad_model_path,
             vad_ctx,
         })
@@ -155,7 +166,7 @@ impl Scribble {
             let spec = whisper_wav_spec();
             let found_speech = to_speech_only(&mut self.vad_ctx, &spec, &mut samples)?;
             if found_speech {
-                write_segments(&self.ctx, opts, encoder, &samples)?;
+                self.backend.transcribe_full(opts, encoder, &samples)?;
             }
             return Ok(());
         }
@@ -169,16 +180,16 @@ impl Scribble {
             decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)
         });
 
-        let mut transcriber = BufferedSegmentTranscriber::new(&self.ctx, opts, encoder);
+        let mut stream = self.backend.create_stream(opts, encoder)?;
 
         // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
         // decode thread continues reading.
         while let Ok(chunk) = rx.recv() {
-            transcriber.on_samples(&chunk)?;
+            let _ = stream.on_samples(&chunk)?;
         }
 
         // Ensure we flush any final segments.
-        let finish_res = transcriber.finish();
+        let finish_res = stream.finish();
 
         // If decode failed, surface that error (but still prefer a transcription error if present).
         let decode_res: Result<()> = match decode_handle.join() {
@@ -194,11 +205,14 @@ impl Scribble {
         }
     }
 
-    /// Access the underlying Whisper context.
-    ///
-    /// This is primarily intended for advanced or experimental use-cases.
-    pub fn context(&self) -> &WhisperContext {
-        &self.ctx
+    /// Access the configured backend.
+    pub fn backend(&self) -> &B {
+        &self.backend
+    }
+
+    /// Access the configured backend mutably.
+    pub fn backend_mut(&mut self) -> &mut B {
+        &mut self.backend
     }
 
     /// Access the underlying VAD context.

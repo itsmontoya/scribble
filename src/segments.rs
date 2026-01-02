@@ -61,26 +61,13 @@ pub fn write_segments(
     encoder: &mut dyn SegmentEncoder,
     samples: &[f32],
 ) -> Result<()> {
-    let state = run_whisper_full(ctx, o, samples)?;
-
     // We want “try our best to close” semantics.
     // If a segment write fails, we stop writing further segments, but we still try to close
     // the encoder to finalize output.
     let mut first_err: Option<anyhow::Error> = None;
 
-    for whisper_segment in state.as_iter() {
-        let segment = match to_segment(whisper_segment) {
-            Ok(segment) => segment,
-            Err(err) => {
-                first_err = Some(err);
-                break;
-            }
-        };
-
-        if let Err(err) = encoder.write_segment(&segment) {
-            first_err = Some(err);
-            break;
-        }
+    if let Err(err) = emit_segments(ctx, o, samples, &mut |seg| encoder.write_segment(seg)) {
+        first_err = Some(err);
     }
 
     // Always attempt to close, even if we encountered an earlier error.
@@ -92,6 +79,23 @@ pub fn write_segments(
         (Some(err), Ok(())) => Err(err),
         (Some(err), Err(close_err)) => Err(err.context(close_err)),
     }
+}
+
+/// Run whisper on the provided samples and invoke `on_segment` for each produced segment.
+///
+/// Unlike [`write_segments`], this does not manage encoder lifecycle; it simply emits segments.
+pub fn emit_segments(
+    ctx: &WhisperContext,
+    o: &Opts,
+    samples: &[f32],
+    on_segment: &mut dyn FnMut(&Segment) -> Result<()>,
+) -> Result<()> {
+    let state = run_whisper_full(ctx, o, samples)?;
+    for whisper_segment in state.as_iter() {
+        let segment = to_segment(whisper_segment)?;
+        on_segment(&segment)?;
+    }
+    Ok(())
 }
 
 /// Convert a `WhisperSegment` from whisper.rs into our serializable `Segment` type.
