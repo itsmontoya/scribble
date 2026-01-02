@@ -30,4 +30,10 @@ pub struct Opts {
 
     /// The desired output format for transcription segments.
     pub output_type: OutputType,
+
+    /// Minimum buffered audio duration (seconds) before running Whisper in incremental mode.
+    ///
+    /// This only affects the streaming/incremental path (when VAD is disabled). Larger windows
+    /// increase latency but can improve segmentation stability.
+    pub incremental_min_window_seconds: usize,
 }

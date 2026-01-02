@@ -14,6 +14,7 @@
 
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
+use std::sync::mpsc;
 
 use anyhow::{Context, Result, ensure};
 use hound::WavSpec;
@@ -22,10 +23,12 @@ use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
 use crate::audio_pipeline::WHISPER_SAMPLE_RATE;
 use crate::ctx::get_context;
 use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_whisper_stream_from_read};
+use crate::incremental::BufferedSegmentTranscriber;
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::logging::init_whisper_logging;
 use crate::opts::Opts;
 use crate::output_type::OutputType;
+use crate::segment_encoder::SegmentEncoder;
 use crate::segments::write_segments;
 use crate::vad::to_speech_only;
 use crate::vtt_encoder::VttEncoder;
@@ -111,38 +114,6 @@ impl Scribble {
         R: Read + Send + Sync + 'static,
         W: Write,
     {
-        // We decode into a `Vec<f32>` because Whisper wants a contiguous sample buffer.
-        // (If we later add incremental/streaming Whisper, we'll revisit this.)
-        let mut samples = Vec::<f32>::new();
-        let mut sink = VecSamplesSink::new(&mut samples);
-
-        // Decode any supported input into Whisper-compatible samples (mono, 16kHz).
-        // The decoder pushes chunks into our sink via `on_samples`.
-        decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)?;
-
-        // If decoding produced no audio, we exit successfully with no output.
-        if samples.is_empty() {
-            return Ok(());
-        }
-
-        // We construct a minimal `WavSpec` for downstream code that relies on sample rate.
-        // Since the decoder guarantees mono 16kHz output, we can hardcode these fields.
-        let spec = WavSpec {
-            channels: 1,
-            sample_rate: WHISPER_SAMPLE_RATE,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-
-        // Optionally apply VAD by extracting padded speech windows and concatenating them.
-        // If VAD finds no speech, we exit successfully with no output.
-        if opts.enable_voice_activity_detection {
-            let found_speech = to_speech_only(&mut self.vad_ctx, &spec, &mut samples)?;
-            if !found_speech {
-                return Ok(());
-            }
-        }
-
         // Buffer output for efficiency (especially important for stdout).
         let writer = BufWriter::new(w);
 
@@ -151,15 +122,76 @@ impl Scribble {
         match opts.output_type {
             OutputType::Json => {
                 let mut encoder = JsonArrayEncoder::new(writer);
-                write_segments(&self.ctx, opts, &mut encoder, &samples)?;
+                let run_res = self.transcribe_with_encoder(r, opts, &mut encoder);
+                merge_run_and_close(run_res, encoder.close())
             }
             OutputType::Vtt => {
                 let mut encoder = VttEncoder::new(writer);
-                write_segments(&self.ctx, opts, &mut encoder, &samples)?;
+                let run_res = self.transcribe_with_encoder(r, opts, &mut encoder);
+                merge_run_and_close(run_res, encoder.close())
             }
         }
+    }
 
-        Ok(())
+    fn transcribe_with_encoder<R, E>(&mut self, r: R, opts: &Opts, encoder: &mut E) -> Result<()>
+    where
+        R: Read + Send + Sync + 'static,
+        E: SegmentEncoder,
+    {
+        if opts.enable_voice_activity_detection {
+            // NOTE: VAD is currently **not** supported in the streaming/incremental flow.
+            //
+            // Today we run VAD by decoding the *entire* input into a contiguous buffer,
+            // applying VAD in-place, then running a single Whisper pass.
+            //
+            // Follow-up: rework VAD into a streaming-friendly “middleware” (Read -> Read, or
+            // chunk/sink based) so VAD-enabled transcription can share the same incremental
+            // pipeline as the non-VAD path.
+            let mut samples = decode_all_samples(r)?;
+            if samples.is_empty() {
+                return Ok(());
+            }
+
+            let spec = whisper_wav_spec();
+            let found_speech = to_speech_only(&mut self.vad_ctx, &spec, &mut samples)?;
+            if found_speech {
+                write_segments(&self.ctx, opts, encoder, &samples)?;
+            }
+            return Ok(());
+        }
+
+        // Streaming-friendly path: run decode on a separate thread so reading/decoding can
+        // continue even while Whisper inference is running.
+        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
+
+        let decode_handle = std::thread::spawn(move || -> Result<()> {
+            let mut sink = ChannelSamplesSink { tx };
+            decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)
+        });
+
+        let mut transcriber = BufferedSegmentTranscriber::new(&self.ctx, opts, encoder);
+
+        // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
+        // decode thread continues reading.
+        while let Ok(chunk) = rx.recv() {
+            transcriber.on_samples(&chunk)?;
+        }
+
+        // Ensure we flush any final segments.
+        let finish_res = transcriber.finish();
+
+        // If decode failed, surface that error (but still prefer a transcription error if present).
+        let decode_res: Result<()> = match decode_handle.join() {
+            Ok(res) => res,
+            Err(_) => Err(anyhow::anyhow!("decoder thread panicked")),
+        };
+
+        match (finish_res, decode_res) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Ok(()), Err(err)) => Err(err),
+            (Err(err), Ok(())) => Err(err),
+            (Err(err), Err(decode_err)) => Err(err.context(decode_err)),
+        }
     }
 
     /// Access the underlying Whisper context.
@@ -205,6 +237,50 @@ impl<'a> SamplesSink for VecSamplesSink<'a> {
     fn on_samples(&mut self, samples_16k_mono: &[f32]) -> Result<bool> {
         // We append chunks as they arrive. This preserves ordering and builds the full buffer.
         self.out.extend_from_slice(samples_16k_mono);
+        Ok(true)
+    }
+}
+
+fn whisper_wav_spec() -> WavSpec {
+    WavSpec {
+        channels: 1,
+        sample_rate: WHISPER_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    }
+}
+
+fn decode_all_samples<R>(r: R) -> Result<Vec<f32>>
+where
+    R: Read + Send + Sync + 'static,
+{
+    let mut samples = Vec::<f32>::new();
+    let mut sink = VecSamplesSink::new(&mut samples);
+    decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)?;
+    Ok(samples)
+}
+
+fn merge_run_and_close(run_res: Result<()>, close_res: Result<()>) -> Result<()> {
+    match (run_res, close_res) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(close_err)) => Err(close_err),
+        (Err(err), Ok(())) => Err(err),
+        (Err(err), Err(close_err)) => Err(err.context(close_err)),
+    }
+}
+
+struct ChannelSamplesSink {
+    tx: mpsc::SyncSender<Vec<f32>>,
+}
+
+impl SamplesSink for ChannelSamplesSink {
+    fn on_samples(&mut self, samples_16k_mono: &[f32]) -> Result<bool> {
+        // Copy into an owned buffer so the decoder thread can send it across threads safely.
+        // Whisper inference runs on the receiver side.
+        let buf = samples_16k_mono.to_vec();
+        self.tx
+            .send(buf)
+            .map_err(|_| anyhow::anyhow!("decoder output channel disconnected"))?;
         Ok(true)
     }
 }

@@ -66,6 +66,9 @@ impl<W: Write> SegmentEncoder for VttEncoder<W> {
         // Blank line separates cues.
         writeln!(&mut self.w)?;
 
+        // Flush so streaming consumers (stdout, pipes, sockets) see output promptly.
+        self.w.flush()?;
+
         Ok(())
     }
 

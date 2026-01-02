@@ -42,6 +42,9 @@ pub mod segments;
 /// Token data structures.
 pub mod token;
 
+// Incremental transcription helpers (internal).
+pub(crate) mod incremental;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio preprocessing pipeline
 // ─────────────────────────────────────────────────────────────────────────────
