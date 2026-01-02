@@ -14,6 +14,7 @@
 
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
+use std::sync::mpsc;
 
 use anyhow::{Context, Result, ensure};
 use hound::WavSpec;
@@ -159,9 +160,38 @@ impl Scribble {
             return Ok(());
         }
 
+        // Streaming-friendly path: run decode on a separate thread so reading/decoding can
+        // continue even while Whisper inference is running.
+        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
+
+        let decode_handle = std::thread::spawn(move || -> Result<()> {
+            let mut sink = ChannelSamplesSink { tx };
+            decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)
+        });
+
         let mut transcriber = BufferedSegmentTranscriber::new(&self.ctx, opts, encoder);
-        decode_to_whisper_stream_from_read(r, StreamDecodeOpts::default(), &mut transcriber)?;
-        transcriber.finish()
+
+        // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
+        // decode thread continues reading.
+        while let Ok(chunk) = rx.recv() {
+            transcriber.on_samples(&chunk)?;
+        }
+
+        // Ensure we flush any final segments.
+        let finish_res = transcriber.finish();
+
+        // If decode failed, surface that error (but still prefer a transcription error if present).
+        let decode_res: Result<()> = match decode_handle.join() {
+            Ok(res) => res,
+            Err(_) => Err(anyhow::anyhow!("decoder thread panicked")),
+        };
+
+        match (finish_res, decode_res) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Ok(()), Err(err)) => Err(err),
+            (Err(err), Ok(())) => Err(err),
+            (Err(err), Err(decode_err)) => Err(err.context(decode_err)),
+        }
     }
 
     /// Access the underlying Whisper context.
@@ -236,5 +266,21 @@ fn merge_run_and_close(run_res: Result<()>, close_res: Result<()>) -> Result<()>
         (Ok(()), Err(close_err)) => Err(close_err),
         (Err(err), Ok(())) => Err(err),
         (Err(err), Err(close_err)) => Err(err.context(close_err)),
+    }
+}
+
+struct ChannelSamplesSink {
+    tx: mpsc::SyncSender<Vec<f32>>,
+}
+
+impl SamplesSink for ChannelSamplesSink {
+    fn on_samples(&mut self, samples_16k_mono: &[f32]) -> Result<bool> {
+        // Copy into an owned buffer so the decoder thread can send it across threads safely.
+        // Whisper inference runs on the receiver side.
+        let buf = samples_16k_mono.to_vec();
+        self.tx
+            .send(buf)
+            .map_err(|_| anyhow::anyhow!("decoder output channel disconnected"))?;
+        Ok(true)
     }
 }
