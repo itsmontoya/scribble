@@ -82,6 +82,9 @@ impl<W: Write> SegmentEncoder for JsonArrayEncoder<W> {
         // Stream the segment directly into the writer as JSON.
         serde_json::to_writer(&mut self.w, seg)?;
 
+        // Flush so streaming consumers (stdout, pipes, sockets) see output promptly.
+        self.w.flush()?;
+
         Ok(())
     }
 
