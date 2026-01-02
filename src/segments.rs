@@ -101,16 +101,17 @@ pub fn write_segments(
 /// - whisper returns text via `to_str()`, which can fail due to UTF-8 conversion,
 ///   so we attach context for better error reporting.
 pub fn to_segment(segment: WhisperSegment) -> Result<Segment> {
-    // cs → seconds (whisper timestamps are centiseconds)
-    let start_seconds = centiseconds_to_seconds(segment.start_timestamp());
-    let end_seconds = centiseconds_to_seconds(segment.end_timestamp());
-
     let text = segment
         .to_str()
         .context("failed to get segment text")?
         .to_owned();
 
     let tokens = tokens_from_segment(&segment)?;
+
+    // Prefer token-derived timing when available to avoid long segments that include
+    // leading/trailing silence. Fall back to whisper’s segment-level timestamps when token
+    // timing is unavailable.
+    let (start_seconds, end_seconds) = segment_seconds_from_tokens_or_fallback(&segment, &tokens);
 
     Ok(Segment {
         start_seconds,
@@ -120,6 +121,37 @@ pub fn to_segment(segment: WhisperSegment) -> Result<Segment> {
         language_code: DEFAULT_LANGUAGE_CODE.to_owned(),
         next_speaker_turn: segment.next_segment_speaker_turn(),
     })
+}
+
+fn segment_seconds_from_tokens_or_fallback(
+    segment: &WhisperSegment,
+    tokens: &[Token],
+) -> (f32, f32) {
+    let mut min_start: Option<f32> = None;
+    let mut max_end: Option<f32> = None;
+
+    for token in tokens {
+        // Filter out whisper special/control tokens (commonly formatted like `[_BEG_]`, `[_TT_50]`).
+        if token.text.starts_with("[_") && token.text.ends_with("_]") {
+            continue;
+        }
+
+        // Skip tokens with unknown timestamps (whisper uses -1, which we clamp to 0.0).
+        if token.start_seconds <= 0.0 && token.end_seconds <= 0.0 {
+            continue;
+        }
+
+        min_start = Some(min_start.map_or(token.start_seconds, |v| v.min(token.start_seconds)));
+        max_end = Some(max_end.map_or(token.end_seconds, |v| v.max(token.end_seconds)));
+    }
+
+    match (min_start, max_end) {
+        (Some(s), Some(e)) if e >= s => (s, e),
+        _ => (
+            centiseconds_to_seconds(segment.start_timestamp()),
+            centiseconds_to_seconds(segment.end_timestamp()),
+        ),
+    }
 }
 
 /// Build the whisper “full” parameters we use for transcription.

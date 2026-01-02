@@ -75,7 +75,7 @@ impl<'a> BufferedSegmentTranscriber<'a> {
     }
 
     pub(crate) fn finish(&mut self) -> Result<()> {
-        while self.process_available(true)? == Progress::Advanced {}
+        let _ = self.process_available(true)?;
         self.samples.clear();
         self.head = 0;
         Ok(())
@@ -220,9 +220,16 @@ impl<'a> BufferedSegmentTranscriber<'a> {
             );
         }
 
-        self.head += end_samples;
-        self.advanced_samples += end_samples;
-        self.maybe_compact();
+        if end_of_stream {
+            // End-of-stream flush is a single inference pass: emit what Whisper produced and
+            // consume the entire remaining window to avoid repeatedly re-running on the tail.
+            self.head = self.samples.len();
+            self.advanced_samples += win_len;
+        } else {
+            self.head += end_samples;
+            self.advanced_samples += end_samples;
+            self.maybe_compact();
+        }
         self.no_progress_runs = 0;
 
         // After emitting (and advancing), wait for more audio before running Whisper again,
