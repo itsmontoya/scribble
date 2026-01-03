@@ -1,5 +1,3 @@
-// src/vad.rs
-
 use anyhow::{Result, anyhow};
 use hound::WavSpec;
 use whisper_rs::{WhisperVadContext, WhisperVadParams, WhisperVadSegments};
@@ -239,23 +237,20 @@ pub struct VadPolicy {
     /// Drop speech segments shorter than this duration.
     pub min_speech_ms: u32,
 
-    /// Merge adjacent segments if the gap between them is <= this duration.
+    /// Merge speech segments separated by less than this gap.
     pub gap_merge_ms: u32,
 
-    /// Multiply non-speech audio by this gain factor (0.0 = mute).
+    /// Gain applied to non-speech regions (0.0 = mute, 1.0 = unchanged).
     pub non_speech_gain: f32,
 }
 
-/// Whisper-friendly, conservative policy.
-///
-/// Optimized for transcription quality over aggressiveness:
-/// - generous padding reduces clipped words
-/// - small gap merge reduces over-fragmentation
+/// Default policy tuned for "keep speech, drop/attenuate silence".
 pub const DEFAULT_VAD_POLICY: VadPolicy = VadPolicy {
-    threshold: 0.2,
-    pre_pad_ms: 600,
-    post_pad_ms: 1200,
-    min_speech_ms: 40,
-    gap_merge_ms: 500,
-    non_speech_gain: 0.1,
+    threshold: 0.5,
+    pre_pad_ms: 250,
+    post_pad_ms: 250,
+    min_speech_ms: 250,
+    gap_merge_ms: 300,
+    non_speech_gain: 0.0,
 };
+
