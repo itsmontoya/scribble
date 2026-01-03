@@ -1,10 +1,8 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, ensure};
-use hound::WavSpec;
-use whisper_rs::{WhisperContext, WhisperVadContext, WhisperVadContextParams};
+use anyhow::{Result, ensure};
+use whisper_rs::WhisperContext;
 
-use crate::audio_pipeline::TARGET_SAMPLE_RATE;
 use crate::backend::{Backend, BackendStream};
 use crate::decoder::SamplesSink;
 use crate::opts::Opts;
@@ -15,16 +13,13 @@ mod incremental;
 mod logging;
 mod segments;
 mod token;
-mod vad;
 
 use incremental::BufferedSegmentTranscriber;
 use segments::emit_segments;
-use vad::to_speech_only;
 
 /// Built-in backend powered by `whisper-rs` / `whisper.cpp`.
 pub struct WhisperBackend {
     ctx: WhisperContext,
-    vad_ctx: WhisperVadContext,
     vad_model_path: String,
 }
 
@@ -64,14 +59,8 @@ impl WhisperBackend {
 
         let ctx = ctx::get_context(model_path)?;
 
-        // Load the VAD model once so repeated transcriptions don't re-initialize it.
-        let vad_ctx_params = WhisperVadContextParams::default();
-        let vad_ctx = WhisperVadContext::new(vad_model_path, vad_ctx_params)
-            .with_context(|| format!("failed to load VAD model from '{}'", vad_model_path))?;
-
         Ok(Self {
             ctx,
-            vad_ctx,
             vad_model_path: vad_model_path.to_owned(),
         })
     }
@@ -93,10 +82,6 @@ impl Backend for WhisperBackend {
     where
         Self: 'a;
 
-    fn requires_full_audio(&self, opts: &Opts) -> bool {
-        opts.enable_voice_activity_detection
-    }
-
     fn transcribe_full(
         &mut self,
         opts: &Opts,
@@ -107,29 +92,9 @@ impl Backend for WhisperBackend {
             return Ok(());
         }
 
-        if !opts.enable_voice_activity_detection {
-            return emit_segments(&self.ctx, opts, samples, &mut |seg| encoder.write_segment(seg));
-        }
-
-        // NOTE: VAD is currently **not** supported in the streaming/incremental flow.
-        //
-        // Today we run VAD by decoding the *entire* input into a contiguous buffer,
-        // applying VAD in-place, then running a single Whisper pass.
-        let mut samples = samples.to_vec();
-
-        let spec = WavSpec {
-            channels: 1,
-            sample_rate: TARGET_SAMPLE_RATE,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-
-        let found_speech = to_speech_only(&mut self.vad_ctx, &spec, &mut samples)?;
-        if !found_speech {
-            return Ok(());
-        }
-
-        emit_segments(&self.ctx, opts, &samples, &mut |seg| encoder.write_segment(seg))
+        // VAD workflow is temporarily disabled while the streaming-focused version is reworked.
+        let _ = opts.enable_voice_activity_detection;
+        emit_segments(&self.ctx, opts, samples, &mut |seg| encoder.write_segment(seg))
     }
 
     fn create_stream<'a>(
@@ -137,13 +102,10 @@ impl Backend for WhisperBackend {
         opts: &'a Opts,
         encoder: &'a mut dyn SegmentEncoder,
     ) -> Result<Self::Stream<'a>> {
-        ensure!(
-            !opts.enable_voice_activity_detection,
-            "streaming transcription does not currently support VAD; disable `enable_voice_activity_detection` or run in full-audio mode"
-        );
+        // VAD workflow is temporarily disabled while the streaming-focused version is reworked.
+        let _ = opts.enable_voice_activity_detection;
         Ok(WhisperStream {
             inner: BufferedSegmentTranscriber::new(&self.ctx, opts, encoder),
         })
     }
 }
-

@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use hound::{WavReader, WavSpec};
 use std::io::{Read, Seek};
 
+use crate::audio_pipeline::TARGET_SAMPLE_RATE;
+
 /// Load WAV audio from a reader and return normalized audio samples.
 ///
 /// What we return:
@@ -10,11 +12,10 @@ use std::io::{Read, Seek};
 ///
 /// Format requirements:
 /// - Mono (1 channel)
-/// - 16 kHz sample rate
+/// - Scribble's target sample rate
 ///
 /// Why we enforce this:
-/// - whisper.cpp is tuned specifically for 16 kHz mono audio
-/// - enforcing constraints here keeps the rest of the pipeline simple and predictable
+/// - enforcing constraints here keeps downstream transcription simple and predictable
 pub fn get_samples_from_wav_reader<R>(reader: R) -> Result<(Vec<f32>, WavSpec)>
 where
     R: Read + Seek,
@@ -31,17 +32,18 @@ where
         );
     }
 
-    // We require a 16 kHz sample rate.
-    if spec.sample_rate != 16_000 {
+    // We require the target sample rate.
+    if spec.sample_rate != TARGET_SAMPLE_RATE {
         anyhow::bail!(
-            "expected 16 kHz sample rate, got {} Hz (whisper.cpp is tuned for 16 kHz)",
+            "expected {} Hz sample rate, got {} Hz",
+            TARGET_SAMPLE_RATE,
             spec.sample_rate
         );
     }
 
     // Read samples and normalize from i16 PCM to f32 in [-1.0, 1.0].
     //
-    // whisper_rs expects audio in this normalized floating-point format.
+    // Most ASR backends expect audio in this normalized floating-point format.
     let mut samples = Vec::new();
     for sample in reader.samples::<i16>() {
         let pcm = sample?;

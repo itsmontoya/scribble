@@ -1,4 +1,4 @@
-//! `scribble` — a small, focused transcription library built on top of Whisper.
+//! `scribble` — a small, focused transcription library with a pluggable ASR backend.
 //!
 //! # Overview
 //!
@@ -8,8 +8,7 @@
 //! At a high level, Scribble wires together:
 //! - Media demuxing and audio decoding (via Symphonia)
 //! - Audio normalization and resampling (mono, 16 kHz)
-//! - Optional Voice Activity Detection (VAD)
-//! - Whisper inference
+//! - Backend inference (built-in Whisper backend available)
 //! - Pluggable output encoders (JSON, VTT, etc.)
 //!
 //! The library emphasizes:
@@ -37,26 +36,17 @@ pub mod backends;
 pub mod opts;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Whisper + transcription core
+// Transcription core
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Whisper model loading and context management.
-pub mod ctx;
 
 /// Segment data structures and transcription helpers.
 pub mod segments;
 /// Token data structures.
 pub mod token;
 
-// Incremental transcription helpers (internal).
-pub(crate) mod incremental;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio preprocessing pipeline
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Voice Activity Detection (VAD) utilities and policies.
-pub mod vad;
 
 /// Streaming-friendly audio decoding and normalization helpers.
 pub mod decoder;
@@ -92,6 +82,3 @@ pub mod vtt_encoder;
 // ─────────────────────────────────────────────────────────────────────────────
 // Infrastructure
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Logging configuration and control.
-pub mod logging;

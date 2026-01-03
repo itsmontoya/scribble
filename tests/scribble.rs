@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use scribble::{opts::Opts, output_type::OutputType, scribble::Scribble};
+use scribble::{backends::whisper::WhisperBackend, opts::Opts, output_type::OutputType, scribble::Scribble};
 
 const FIXTURE_WAV: &str = "tests/fixtures/treat_yo_self.wav";
 const WHISPER_MODEL: &str = "./models/ggml-large-v3-turbo.bin";
@@ -15,7 +15,7 @@ fn require_file(path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn new_scribble_or_skip() -> anyhow::Result<Option<Scribble>> {
+fn new_scribble_or_skip() -> anyhow::Result<Option<Scribble<WhisperBackend>>> {
     require_file(WHISPER_MODEL)?;
     require_file(VAD_MODEL)?;
     if !Path::new(WHISPER_MODEL).exists() || !Path::new(VAD_MODEL).exists() {
@@ -25,7 +25,7 @@ fn new_scribble_or_skip() -> anyhow::Result<Option<Scribble>> {
     Ok(Some(Scribble::new(WHISPER_MODEL, VAD_MODEL)?))
 }
 
-fn run_to_json(scribble: &mut Scribble, opts: &Opts) -> anyhow::Result<String> {
+fn run_to_json(scribble: &mut Scribble<WhisperBackend>, opts: &Opts) -> anyhow::Result<String> {
     let wav = std::fs::File::open(FIXTURE_WAV)?;
     let mut out = Vec::new();
 

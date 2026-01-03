@@ -5,11 +5,11 @@
 [Latest Version]: https://img.shields.io/crates/v/scribble.svg
 [crates.io]: https://crates.io/crates/scribble
 
-Scribble is a fast, lightweight transcription engine written in Rust, built on top of Whisper and designed for both CLI and webserver use.
+Scribble is a fast, lightweight transcription engine written in Rust, with a built-in Whisper backend and a backend trait for custom implementations.
 
 ![billboard](https://github.com/itsmontoya/scribble/blob/main/banner.png?raw=true "Scribble billboard")
 
-Scribble will demux/decode **audio *or* video containers** (MP4, MP3, WAV, FLAC, OGG, WebM, MKV, etc.), downmix to mono, and resample to Whisper’s expected 16 kHz — no preprocessing required.
+Scribble will demux/decode **audio *or* video containers** (MP4, MP3, WAV, FLAC, OGG, WebM, MKV, etc.), downmix to mono, and resample to 16 kHz — no preprocessing required.
 
 ## Goals
 
@@ -90,7 +90,7 @@ It accepts audio or video containers and normalizes them to Whisper’s required
 
 - an input media path (e.g. MP4, MP3, WAV, FLAC, OGG, WebM, MKV) or `-` to stream from stdin
 - a Whisper model
-- (optionally) a Whisper-VAD model
+- a Whisper-VAD model (used when `--enable-vad` is set)
 
 ### Basic transcription (VTT output)
 
@@ -151,16 +151,6 @@ cargo run --bin scribble-cli -- \
   > transcript.vtt
 ```
 
-### Use the Silero ONNX backend (experimental)
-
-```bash
-cargo run --release --features silero-onnx --bin scribble-cli -- \
-  --model ./models/silero.onnx \
-  --silero-vocab ./models/en_v1_labels.json \
-  --vad-model ./models/ggml-silero-v6.2.0.bin \
-  --input ./input.wav
-```
-
 ## Library usage
 
 Scribble is also designed to be embedded as a library.
@@ -171,7 +161,7 @@ High-level usage looks like:
 use scribble::{opts::Opts, output_type::OutputType, scribble::Scribble};
 use std::fs::File;
 
-let scribble = Scribble::new(
+let mut scribble = Scribble::new(
     "./models/ggml-large-v3-turbo.bin",
     "./models/ggml-silero-v6.2.0.bin",
 )?;
@@ -184,39 +174,13 @@ let opts = Opts {
     enable_voice_activity_detection: true,
     language: None,
     output_type: OutputType::Json,
+    incremental_min_window_seconds: 1,
 };
 
 scribble.transcribe(&mut input, &mut output, &opts)?;
 
 let json = String::from_utf8(output)?;
 println!("{json}");
-```
-
-## Experimental: Silero ASR (ONNX)
-
-Scribble also includes an experimental Silero backend behind a feature flag:
-
-```bash
-cargo build --features silero-onnx
-```
-
-Library usage:
-
-```rust
-use scribble::{opts::Opts, output_type::OutputType, scribble::Scribble};
-
-let mut scribble = Scribble::new_silero(
-    "./models/silero-asr.onnx",
-    "./models/ggml-silero-v6.2.0.bin",
-)?;
-
-let opts = Opts {
-    enable_translate_to_english: false,
-    enable_voice_activity_detection: false,
-    language: Some("en".to_string()),
-    output_type: OutputType::Json,
-    incremental_min_window_seconds: 1,
-};
 ```
 
 ## TODOs
