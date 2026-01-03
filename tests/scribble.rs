@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use scribble::{backends::whisper::WhisperBackend, opts::Opts, output_type::OutputType, scribble::Scribble};
+use scribble::{
+    backends::whisper::WhisperBackend, opts::Opts, output_type::OutputType, scribble::Scribble,
+};
 
 const FIXTURE_WAV: &str = "tests/fixtures/treat_yo_self.wav";
 const WHISPER_MODEL: &str = "./models/ggml-large-v3-turbo.bin";

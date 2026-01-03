@@ -1,5 +1,5 @@
-use serde::Serialize;
 use crate::token::Token;
+use serde::Serialize;
 
 /// A single transcription segment produced by an ASR backend.
 ///

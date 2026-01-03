@@ -32,4 +32,3 @@ pub(super) fn tokens_from_segment(segment: &WhisperSegment) -> Result<Vec<Token>
 
     Ok(tokens)
 }
-

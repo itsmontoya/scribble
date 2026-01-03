@@ -91,7 +91,8 @@ impl<'a> BufferedSegmentTranscriber<'a> {
         // Compact when either:
         // - we’ve consumed at least 1s of audio, or
         // - the head is past half the buffer
-        let should_compact = self.head >= TARGET_SAMPLE_RATE as usize || self.head >= self.samples.len() / 2;
+        let should_compact =
+            self.head >= TARGET_SAMPLE_RATE as usize || self.head >= self.samples.len() / 2;
         if should_compact {
             self.samples.drain(..self.head);
             self.head = 0;
@@ -256,4 +257,3 @@ fn apply_time_offset(segment: &mut crate::segments::Segment, offset_seconds: f32
         token.end_seconds += offset_seconds;
     }
 }
-

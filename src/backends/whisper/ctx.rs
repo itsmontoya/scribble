@@ -13,4 +13,3 @@ pub fn get_context(model_path: &str) -> Result<WhisperContext> {
 
     Ok(ctx)
 }
-

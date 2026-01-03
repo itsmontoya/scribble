@@ -120,4 +120,3 @@ pub(super) fn run_whisper_full(
 
     Ok(state)
 }
-

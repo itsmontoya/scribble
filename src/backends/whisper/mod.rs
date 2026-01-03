@@ -50,7 +50,11 @@ impl WhisperBackend {
         );
 
         let vad_path = Path::new(vad_model_path);
-        ensure!(vad_path.exists(), "VAD model not found at '{}'", vad_model_path);
+        ensure!(
+            vad_path.exists(),
+            "VAD model not found at '{}'",
+            vad_model_path
+        );
         ensure!(
             vad_path.is_file(),
             "VAD model path is not a file: '{}'",
@@ -94,7 +98,9 @@ impl Backend for WhisperBackend {
 
         // VAD workflow is temporarily disabled while the streaming-focused version is reworked.
         let _ = opts.enable_voice_activity_detection;
-        emit_segments(&self.ctx, opts, samples, &mut |seg| encoder.write_segment(seg))
+        emit_segments(&self.ctx, opts, samples, &mut |seg| {
+            encoder.write_segment(seg)
+        })
     }
 
     fn create_stream<'a>(
