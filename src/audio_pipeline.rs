@@ -3,7 +3,7 @@
 //! Responsibilities:
 //! - Convert Symphonia-decoded PCM into interleaved `f32`
 //! - Downmix to mono
-//! - Resample to Whisper’s expected 16 kHz (when needed)
+//! - Resample to Scribble’s target sample rate (when needed)
 //! - Emit fixed-size chunks via a callback (incremental consumption)
 //!
 //! Notes:
@@ -14,8 +14,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use rubato::{Resampler, SincFixedIn, WindowFunction};
 use symphonia::core::audio::{AudioBufferRef, SampleBuffer};
 
-/// Whisper expects mono audio sampled at 16 kHz.
-pub const WHISPER_SAMPLE_RATE: u32 = 16_000;
+/// Scribble's target mono sample rate (Hz).
+pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 
 /// A small stateful pipeline that converts decoded audio into mono 16 kHz `f32` chunks.
 pub struct AudioPipeline {
@@ -61,7 +61,7 @@ impl AudioPipeline {
     pub fn push_decoded_and_emit(
         &mut self,
         decoded: &AudioBufferRef<'_>,
-        target_chunk_frames_16k: usize,
+        target_chunk_frames: usize,
         mut emit: impl FnMut(&[f32]) -> Result<bool>,
     ) -> Result<()> {
         let (interleaved, src_rate, channels) =
@@ -69,15 +69,15 @@ impl AudioPipeline {
 
         let mono_src = downmix_to_mono(&interleaved, channels);
 
-        // Fast path: already 16 kHz.
-        if src_rate == WHISPER_SAMPLE_RATE {
-            emit_mono_chunks(&mono_src, target_chunk_frames_16k, &mut emit)?;
+        // Fast path: already at the target sample rate.
+        if src_rate == TARGET_SAMPLE_RATE {
+            emit_mono_chunks(&mono_src, target_chunk_frames, &mut emit)?;
             return Ok(());
         }
 
-        // Slow path: resample to 16 kHz.
+        // Slow path: resample to the target sample rate.
         self.ensure_resampler(src_rate)?;
-        self.push_and_flush_resampler(&mono_src, target_chunk_frames_16k, &mut emit)?;
+        self.push_and_flush_resampler(&mono_src, target_chunk_frames, &mut emit)?;
         Ok(())
     }
 
@@ -86,7 +86,7 @@ impl AudioPipeline {
     /// If resampling was never needed, this is a no-op.
     pub fn finalize(
         &mut self,
-        target_chunk_frames_16k: usize,
+        target_chunk_frames: usize,
         mut emit: impl FnMut(&[f32]) -> Result<bool>,
     ) -> Result<()> {
         let Some(rs) = self.resampler.as_mut() else {
@@ -110,7 +110,7 @@ impl AudioPipeline {
             let block: Vec<f32> = self.mono_src_acc.drain(..in_max).collect();
 
             let out = self.resample_block_into_out(&block)?;
-            emit_mono_chunks(out, target_chunk_frames_16k, &mut emit)?;
+            emit_mono_chunks(out, target_chunk_frames, &mut emit)?;
         }
 
         Ok(())
@@ -126,7 +126,7 @@ impl AudioPipeline {
         let in_chunk_src_frames = 2048;
 
         let rs = SincFixedIn::<f32>::new(
-            WHISPER_SAMPLE_RATE as f64 / src_rate as f64,
+            TARGET_SAMPLE_RATE as f64 / src_rate as f64,
             2.0,
             rubato::SincInterpolationParameters {
                 sinc_len: 256,
@@ -148,7 +148,7 @@ impl AudioPipeline {
     fn push_and_flush_resampler(
         &mut self,
         mono_src: &[f32],
-        target_chunk_frames_16k: usize,
+        target_chunk_frames: usize,
         emit: &mut impl FnMut(&[f32]) -> Result<bool>,
     ) -> Result<()> {
         self.mono_src_acc.extend_from_slice(mono_src);
@@ -169,7 +169,7 @@ impl AudioPipeline {
 
             // `out` is a borrowed view into `self.resample_out_chan`.
             // Emit in fixed-size chunks.
-            for chunk in out.chunks(target_chunk_frames_16k) {
+            for chunk in out.chunks(target_chunk_frames) {
                 if !emit(chunk)? {
                     return Ok(());
                 }
@@ -179,7 +179,7 @@ impl AudioPipeline {
         Ok(())
     }
 
-    /// Resample one mono block and return a borrowed view of the mono 16 kHz output.
+    /// Resample one mono block and return a borrowed view of the mono output at the target sample rate.
     ///
     /// This avoids allocating/cloning the output for every block; the returned slice is
     /// valid until the next call to `resample_block_into_out`.

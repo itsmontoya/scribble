@@ -1,7 +1,7 @@
 //! Incremental, segment-driven transcription over a growing sample buffer.
 //!
 //! This module provides a small adapter that:
-//! - buffers decoded 16 kHz mono samples
+//! - buffers decoded mono samples at Scribble's target sample rate
 //! - runs Whisper once the buffer reaches a minimum duration
 //! - emits the first completed segment
 //! - advances the buffer by that segment’s end timestamp
@@ -9,11 +9,12 @@
 use anyhow::{Context, Result, ensure};
 use whisper_rs::WhisperContext;
 
-use crate::audio_pipeline::WHISPER_SAMPLE_RATE;
+use crate::audio_pipeline::TARGET_SAMPLE_RATE;
 use crate::decoder::SamplesSink;
 use crate::opts::Opts;
 use crate::segment_encoder::SegmentEncoder;
-use crate::segments::{run_whisper_full, to_segment};
+
+use super::segments::{run_whisper_full, to_segment};
 
 /// Maximum buffer size before we force progress.
 ///
@@ -51,8 +52,8 @@ impl<'a> BufferedSegmentTranscriber<'a> {
         encoder: &'a mut dyn SegmentEncoder,
     ) -> Self {
         let min_window_seconds = opts.incremental_min_window_seconds.max(1);
-        let min_window_samples = WHISPER_SAMPLE_RATE as usize * min_window_seconds;
-        let max_window_samples = WHISPER_SAMPLE_RATE as usize * DEFAULT_MAX_BUFFER_SECONDS;
+        let min_window_samples = TARGET_SAMPLE_RATE as usize * min_window_seconds;
+        let max_window_samples = TARGET_SAMPLE_RATE as usize * DEFAULT_MAX_BUFFER_SECONDS;
         Self {
             ctx,
             opts,
@@ -91,7 +92,7 @@ impl<'a> BufferedSegmentTranscriber<'a> {
         // - we’ve consumed at least 1s of audio, or
         // - the head is past half the buffer
         let should_compact =
-            self.head >= WHISPER_SAMPLE_RATE as usize || self.head >= self.samples.len() / 2;
+            self.head >= TARGET_SAMPLE_RATE as usize || self.head >= self.samples.len() / 2;
         if should_compact {
             self.samples.drain(..self.head);
             self.head = 0;
@@ -155,7 +156,7 @@ impl<'a> BufferedSegmentTranscriber<'a> {
             return Ok(Progress::NoOp);
         }
 
-        let offset_seconds = self.advanced_samples as f32 / WHISPER_SAMPLE_RATE as f32;
+        let offset_seconds = self.advanced_samples as f32 / TARGET_SAMPLE_RATE as f32;
 
         for segment_idx in 0..emit_count {
             let whisper_segment = state
@@ -235,7 +236,7 @@ fn segment_end_samples(end_timestamp_cs: i64, available_samples: usize) -> Resul
         .context("whisper end timestamp did not fit in usize")?;
 
     // Whisper timestamps are centiseconds (1/100s).
-    let mut end_samples = end_timestamp_cs.saturating_mul(WHISPER_SAMPLE_RATE as usize) / 100;
+    let mut end_samples = end_timestamp_cs.saturating_mul(TARGET_SAMPLE_RATE as usize) / 100;
 
     // Avoid infinite loops if whisper returns a degenerate segment.
     if end_samples == 0 {

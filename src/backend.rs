@@ -6,7 +6,7 @@ use crate::segment_encoder::SegmentEncoder;
 
 /// Pluggable ASR backend used by [`crate::scribble::Scribble`].
 ///
-/// A backend is responsible for turning 16kHz mono `f32` samples into `Segment`s written via a
+/// A backend is responsible for turning mono `f32` samples at Scribble's target sample rate into `Segment`s written via a
 /// [`SegmentEncoder`].
 ///
 /// Backends may choose to implement streaming/incremental emission by returning a stream object
@@ -29,7 +29,7 @@ pub trait Backend {
         &mut self,
         opts: &Opts,
         encoder: &mut dyn SegmentEncoder,
-        samples_16k_mono: &[f32],
+        samples: &[f32],
     ) -> Result<()>;
 
     /// Create a streaming transcriber that accepts samples incrementally.
