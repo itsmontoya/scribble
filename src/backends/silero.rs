@@ -131,23 +131,23 @@ fn parse_vocab_text(s: &str) -> Result<Vec<String>> {
     let trimmed = s.trim_start();
 
     // Try JSON first (Silero publishes `*_labels.json` for STT models).
-    if trimmed.starts_with('[') || trimmed.starts_with('{') {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if let Some(arr) = v.as_array() {
-                return Ok(arr
-                    .iter()
-                    .filter_map(|x| x.as_str().map(|t| t.to_owned()))
-                    .collect());
-            }
+    if (trimmed.starts_with('[') || trimmed.starts_with('{'))
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed)
+    {
+        if let Some(arr) = v.as_array() {
+            return Ok(arr
+                .iter()
+                .filter_map(|x| x.as_str().map(|t| t.to_owned()))
+                .collect());
+        }
 
-            if let Some(obj) = v.as_object() {
-                for key in ["labels", "tokens"] {
-                    if let Some(arr) = obj.get(key).and_then(|x| x.as_array()) {
-                        return Ok(arr
-                            .iter()
-                            .filter_map(|x| x.as_str().map(|t| t.to_owned()))
-                            .collect());
-                    }
+        if let Some(obj) = v.as_object() {
+            for key in ["labels", "tokens"] {
+                if let Some(arr) = obj.get(key).and_then(|x| x.as_array()) {
+                    return Ok(arr
+                        .iter()
+                        .filter_map(|x| x.as_str().map(|t| t.to_owned()))
+                        .collect());
                 }
             }
         }
