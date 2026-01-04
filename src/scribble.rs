@@ -42,9 +42,17 @@ pub struct Scribble<B: Backend> {
 
 impl Scribble<WhisperBackend> {
     /// Create a new `Scribble` instance using the built-in Whisper backend.
-    pub fn new(model_path: impl AsRef<str>, vad_model_path: impl AsRef<str>) -> Result<Self> {
-        let backend = WhisperBackend::new(model_path.as_ref(), vad_model_path.as_ref())?;
-        let vad = Some(VadProcessor::new(vad_model_path.as_ref())?);
+    ///
+    /// The default model used for transcription is the first successfully loaded model. Callers
+    /// can select a specific model per transcription via `Opts::model_key`.
+    pub fn new<I, P>(model_paths: I, vad_model_path: impl AsRef<str>) -> Result<Self>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<str>,
+    {
+        let vad_model_path = vad_model_path.as_ref();
+        let backend = WhisperBackend::new(model_paths, vad_model_path)?;
+        let vad = Some(VadProcessor::new(vad_model_path)?);
         Ok(Self { backend, vad })
     }
 }

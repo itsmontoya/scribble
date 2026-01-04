@@ -18,6 +18,7 @@ fn main() -> Result<()> {
     // - keep the library reusable (Opts is the contract)
     // - keep the CLI thin (just parsing + wiring)
     let opts = Opts {
+        model_key: None,
         enable_translate_to_english: params.enable_translation_to_english,
         enable_voice_activity_detection: params.enable_voice_activity_detection,
         language: params.language.clone(),
@@ -36,7 +37,7 @@ fn main() -> Result<()> {
     //
     // `Scribble::new` validates both model paths, so once this succeeds, we know the backend
     // is ready for repeated transcriptions.
-    let mut scribble = Scribble::new(params.model_path, params.vad_model_path)?;
+    let mut scribble = Scribble::new([params.model_path], params.vad_model_path)?;
 
     // Stream transcription output to stdout.
     scribble
