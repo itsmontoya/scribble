@@ -42,47 +42,39 @@ where
         }
     }
 
-    /// Receive and process the next chunk, if any.
-    ///
-    /// Returns:
-    /// - `Ok(Some(vec))` when a processed chunk is produced,
-    /// - `Ok(None)` when the channel is closed and no buffered input remains.
-    pub fn recv_processed(&mut self) -> io::Result<Option<Vec<T>>> {
-        self.fill_in_buf();
+/// Receive and process the next chunk, if any.
+///
+/// This matches the blocking behavior of `std::sync::mpsc::Receiver::recv`:
+/// it waits for enough input to be available to run `process_items`, and returns
+/// `io::ErrorKind::BrokenPipe` once the channel is disconnected and no buffered
+/// input remains.
+    pub fn recv(&mut self) -> io::Result<Vec<T>> {
+        loop {
+            self.fill_in_buf();
 
-        if self.in_buf.is_empty() && self.eof {
-            return Ok(None);
-        }
-
-        if self.in_buf.len() >= self.min_items || self.eof {
-            let input = std::mem::take(&mut self.in_buf);
-            let processed = (self.process_items)(&input)?;
-
-            if processed.is_empty() {
-                if self.eof {
-                    return Ok(None);
-                }
-                return self.recv_processed();
+            if self.in_buf.is_empty() && self.eof {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "pipe receiver disconnected",
+                ));
             }
 
-            return Ok(Some(processed));
-        }
+            if self.in_buf.len() >= self.min_items || self.eof {
+                let input = std::mem::take(&mut self.in_buf);
+                let processed = (self.process_items)(&input)?;
 
-        Ok(None)
-    }
-}
+                if processed.is_empty() {
+                    if self.eof {
+                        return Err(io::Error::new(
+                            io::ErrorKind::BrokenPipe,
+                            "pipe receiver disconnected",
+                        ));
+                    }
+                    continue;
+                }
 
-impl<T, F> Iterator for PipeReceiver<T, F>
-where
-    F: FnMut(&[T]) -> io::Result<Vec<T>>,
-{
-    type Item = io::Result<Vec<T>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.recv_processed() {
-            Ok(Some(v)) => Some(Ok(v)),
-            Ok(None) => None,
-            Err(e) => Some(Err(e)),
+                return Ok(processed);
+            }
         }
     }
 }
@@ -100,9 +92,10 @@ mod tests {
 
         let mut pr =
             PipeReceiver::new(rx, 3, |items: &[u32]| Ok(items.iter().map(|v| v * 2).collect()));
-        let out = pr.next().unwrap().unwrap();
+        let out = pr.recv().unwrap();
         assert_eq!(out, vec![2, 4, 6]);
-        assert!(pr.next().is_none());
+        let err = pr.recv().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
     }
 
     #[test]
@@ -112,8 +105,9 @@ mod tests {
         drop(tx);
 
         let mut pr = PipeReceiver::new(rx, 10, |items: &[u32]| Ok(items.to_vec()));
-        let out = pr.next().unwrap().unwrap();
+        let out = pr.recv().unwrap();
         assert_eq!(out, vec![1, 2]);
-        assert!(pr.next().is_none());
+        let err = pr.recv().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
     }
 }
