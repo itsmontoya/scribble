@@ -97,9 +97,16 @@ impl<B: Backend> Scribble<B> {
         R: Read + Send + Sync + 'static,
         E: SegmentEncoder,
     {
+        // We borrow `backend` and the optional VAD processor separately so we can:
+        // - build the samples receiver (which may borrow the VAD processor), and then
+        // - create the backend stream (which borrows the backend).
+        //
+        // This keeps the rest of the function linear and avoids hidden lifetime gymnastics.
         let (backend, vad_slot) = (&mut self.backend, &mut self.vad);
         let vad = Self::get_vad(vad_slot, opts)?;
 
+        // We start decoding on a dedicated thread so we can overlap I/O + decode with backend
+        // inference. The main thread stays responsible for orchestration and error plumbing.
         let (mut rx, decode_handle) = Self::get_samples_rx(r, opts, vad)?;
 
         let mut stream = backend.create_stream(opts, encoder)?;
@@ -110,13 +117,14 @@ impl<B: Backend> Scribble<B> {
             let _ = stream.on_samples(&chunk)?;
         }
 
-        // Ensure we flush any final segments.
+        // We always ask the backend stream to finish so it can flush any buffered segments.
         let finish_res = stream.finish();
 
-        // If decode failed, surface that error (but still prefer a transcription error if present).
+        // If decode failed, we surface that error (but still prefer a backend/transcription error
+        // if both happened). This keeps failure reporting stable and unsurprising.
         let decode_res: Result<()> = match decode_handle.join() {
             Ok(res) => res,
-            Err(_) => Err(anyhow::anyhow!("decoder thread panicked")),
+            Err(_) => Err(anyhow::anyhow!("audio decoder thread panicked")),
         };
 
         match (finish_res, decode_res) {
@@ -149,8 +157,8 @@ impl<B: Backend> Scribble<B> {
     where
         R: Read + Send + Sync + 'static,
     {
-        // Streaming-friendly path: run decode on a separate thread so reading/decoding can
-        // continue even while Whisper inference is running.
+        // We use a bounded channel to keep memory usage predictable if the backend is slower than
+        // decoding. This also makes backpressure explicit rather than relying on unbounded queues.
         let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
         let decode_opts = StreamDecodeOpts::default();
         let emit_frames = decode_opts.target_chunk_frames;
@@ -161,7 +169,8 @@ impl<B: Backend> Scribble<B> {
         });
 
         let rx = if opts.enable_voice_activity_detection {
-            // Feed the backend incrementally, but buffer enough audio for VAD to be meaningful.
+            // We wrap the decoder receiver so the main loop can stay unchanged when VAD is enabled.
+            // `VadStreamReceiver` is responsible for buffering and flushing VAD state.
             let vad = vad.ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
             let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
             SamplesRx::Vad(vad_rx)
