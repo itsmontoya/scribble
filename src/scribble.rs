@@ -98,16 +98,7 @@ impl<B: Backend> Scribble<B> {
         E: SegmentEncoder,
     {
         let (backend, vad_slot) = (&mut self.backend, &mut self.vad);
-
-        let vad = if opts.enable_voice_activity_detection {
-            Some(
-                vad_slot
-                    .as_mut()
-                    .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?,
-            )
-        } else {
-            None
-        };
+        let vad = Self::get_vad(vad_slot, opts)?;
 
         let (mut rx, decode_handle) = Self::get_samples_rx(r, opts, vad)?;
 
@@ -134,6 +125,20 @@ impl<B: Backend> Scribble<B> {
             (Err(err), Ok(())) => Err(err),
             (Err(err), Err(decode_err)) => Err(err.context(decode_err)),
         }
+    }
+
+    fn get_vad<'a>(
+        vad_slot: &'a mut Option<VadProcessor>,
+        opts: &Opts,
+    ) -> Result<Option<&'a mut VadProcessor>> {
+        if !opts.enable_voice_activity_detection {
+            return Ok(None);
+        }
+
+        vad_slot
+            .as_mut()
+            .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))
+            .map(Some)
     }
 
     fn get_samples_rx<'a, R>(
