@@ -171,7 +171,8 @@ impl<B: Backend> Scribble<B> {
         let rx = if opts.enable_voice_activity_detection {
             // We wrap the decoder receiver so the main loop can stay unchanged when VAD is enabled.
             // `VadStreamReceiver` is responsible for buffering and flushing VAD state.
-            let vad = vad.ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
+            let vad =
+                vad.ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
             let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
             SamplesRx::Vad(vad_rx)
         } else {
