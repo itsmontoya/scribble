@@ -8,6 +8,14 @@ use crate::output_type::OutputType;
 /// - other frontends (APIs, tests, batch jobs) can construct options programmatically
 #[derive(Debug, Clone)]
 pub struct Opts {
+    /// Optional key selecting which loaded model to use for transcription.
+    ///
+    /// For built-in Whisper backends that support loading multiple models, the key is derived
+    /// from the model filename (not the full path).
+    ///
+    /// When `None`, the backend uses its default model (typically the first loaded).
+    pub model_key: Option<String>,
+
     /// Whether to translate speech to English instead of transcribing verbatim.
     ///
     /// Note:
