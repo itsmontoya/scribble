@@ -22,8 +22,9 @@ use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_stream_from_read};
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::opts::Opts;
 use crate::output_type::OutputType;
+use crate::samples_rx::SamplesRx;
 use crate::segment_encoder::SegmentEncoder;
-use crate::vad::{VadProcessor, VadStream};
+use crate::vad::{VadProcessor, VadStream, VadStreamReceiver};
 use crate::vtt_encoder::VttEncoder;
 
 /// The main high-level transcription entry point.
@@ -109,42 +110,23 @@ impl<B: Backend> Scribble<B> {
 
         let mut stream = self.backend.create_stream(opts, encoder)?;
 
-        if opts.enable_voice_activity_detection {
+        let mut rx = if opts.enable_voice_activity_detection {
             let vad = self
                 .vad
                 .as_mut()
                 .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
 
             // Feed the backend incrementally, but buffer enough audio for VAD to be meaningful.
-            let mut vad_stream = VadStream::new(vad);
-
-            while let Ok(chunk) = rx.recv() {
-                vad_stream.push(&chunk)?;
-
-                while let Some(out_chunk) = vad_stream.peek_chunk(emit_frames) {
-                    let _ = stream.on_samples(out_chunk)?;
-                    vad_stream.consume_chunk(emit_frames);
-                }
-            }
-
-            // Flush remaining buffered audio through VAD and emit whatever is left.
-            vad_stream.flush()?;
-
-            while let Some(out_chunk) = vad_stream.peek_chunk(emit_frames) {
-                let _ = stream.on_samples(out_chunk)?;
-                vad_stream.consume_chunk(emit_frames);
-            }
-
-            if let Some(rem) = vad_stream.peek_remainder() {
-                let _ = stream.on_samples(rem)?;
-                vad_stream.consume_remainder();
-            }
+            let vad_rx = VadStreamReceiver::new(rx, VadStream::new(vad), emit_frames);
+            SamplesRx::Vad(vad_rx)
         } else {
-            // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
-            // decode thread continues reading.
-            while let Ok(chunk) = rx.recv() {
-                let _ = stream.on_samples(&chunk)?;
-            }
+            SamplesRx::Plain(rx)
+        };
+
+        // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
+        // decode thread continues reading.
+        while let Ok(chunk) = rx.recv() {
+            let _ = stream.on_samples(&chunk)?;
         }
 
         // Ensure we flush any final segments.
