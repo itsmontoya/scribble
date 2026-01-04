@@ -35,6 +35,9 @@ pub mod backends;
 /// User-configurable transcription options.
 pub mod opts;
 
+/// Voice activity detection (VAD) helpers.
+pub mod vad;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Transcription core
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,5 +1,4 @@
 use anyhow::{Result, anyhow};
-use hound::WavSpec;
 use whisper_rs::{WhisperVadContext, WhisperVadParams, WhisperVadSegments};
 
 /// Voice Activity Detection (VAD) helpers.
@@ -13,18 +12,9 @@ use whisper_rs::{WhisperVadContext, WhisperVadParams, WhisperVadSegments};
 /// Why this design:
 /// - Preserves timeline alignment with the original media (useful for timestamps).
 /// - Lets you keep faint room tone if desired (via `non_speech_gain`).
-pub fn to_speech_only(
-    ctx: &mut WhisperVadContext,
-    spec: &WavSpec,
-    samples: &mut [f32],
-) -> Result<bool> {
-    to_speech_only_with_policy(ctx, spec, samples, DEFAULT_VAD_POLICY)
-}
-
-/// Same as [`to_speech_only`] but allows a custom policy.
 pub fn to_speech_only_with_policy(
     ctx: &mut WhisperVadContext,
-    spec: &WavSpec,
+    sample_rate_hz: u32,
     samples: &mut [f32],
     policy: VadPolicy,
 ) -> Result<bool> {
@@ -32,11 +22,9 @@ pub fn to_speech_only_with_policy(
     let mut vad_params = WhisperVadParams::default();
 
     // Cap max speech duration to avoid producing extremely long segments.
-    // (This value is in milliseconds in whisper_rs.)
-    vad_params.set_max_speech_duration(15_000.0);
+    // (This value is in seconds in whisper_rs / whisper.cpp.)
+    vad_params.set_max_speech_duration(15.0);
 
-    // Some whisper_rs versions expose these setters. If yours doesn't, remove them
-    // and keep filtering logic in `speech_ranges_with_policy`.
     vad_params.set_threshold(policy.threshold);
     vad_params.set_min_speech_duration(policy.min_speech_ms as i32);
 
@@ -44,7 +32,8 @@ pub fn to_speech_only_with_policy(
     let segments = ctx.segments_from_samples(vad_params, samples)?;
 
     // Convert segments -> merged/filtered/padded sample ranges.
-    let Some(ranges) = speech_ranges_with_policy(spec, &segments, samples, policy)? else {
+    let Some(ranges) = speech_ranges_with_policy(sample_rate_hz, &segments, samples, policy)?
+    else {
         return Ok(false);
     };
 
@@ -59,7 +48,7 @@ pub fn to_speech_only_with_policy(
 /// - `Ok(Some(ranges))` when one or more ranges are selected
 /// - `Ok(None)` when no ranges are selected
 fn speech_ranges_with_policy(
-    spec: &WavSpec,
+    sample_rate_hz: u32,
     segments: &WhisperVadSegments,
     samples: &[f32],
     policy: VadPolicy,
@@ -69,8 +58,7 @@ fn speech_ranges_with_policy(
         return Ok(None);
     }
 
-    // Convert VAD timestamps into sample indices using our WAV sample rate.
-    let sample_rate = spec.sample_rate as f32;
+    let sample_rate = sample_rate_hz as f32;
 
     // Convert policy values from ms → samples once.
     let pre_pad_samples = ms_to_samples(policy.pre_pad_ms, sample_rate);
@@ -253,4 +241,3 @@ pub const DEFAULT_VAD_POLICY: VadPolicy = VadPolicy {
     gap_merge_ms: 300,
     non_speech_gain: 0.0,
 };
-
