@@ -15,7 +15,7 @@ pub trait Backend {
     /// Streaming transcription state for this backend.
     ///
     /// The lifetime typically ties together:
-    /// - the backend borrow (`&'a mut self`)
+    /// - the backend borrow (`&'a self`)
     /// - the options borrow (`&'a Opts`)
     /// - the encoder borrow (`&'a mut dyn SegmentEncoder`)
     type Stream<'a>: BackendStream + 'a
@@ -26,7 +26,7 @@ pub trait Backend {
     ///
     /// Backends should not call `encoder.close()`; the caller is responsible for encoder lifecycle.
     fn transcribe_full(
-        &mut self,
+        &self,
         opts: &Opts,
         encoder: &mut dyn SegmentEncoder,
         samples: &[f32],
@@ -36,7 +36,7 @@ pub trait Backend {
     ///
     /// Backends should not call `encoder.close()`; the caller is responsible for encoder lifecycle.
     fn create_stream<'a>(
-        &'a mut self,
+        &'a self,
         opts: &'a Opts,
         encoder: &'a mut dyn SegmentEncoder,
     ) -> Result<Self::Stream<'a>>;

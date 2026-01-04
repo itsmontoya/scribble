@@ -11,7 +11,6 @@ use axum::{Json, Router};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
 
 use scribble::opts::Opts;
 use scribble::output_type::OutputType;
@@ -44,7 +43,7 @@ struct Params {
 
 #[derive(Clone)]
 struct AppState {
-    scribble: Arc<Mutex<Scribble<scribble::backends::whisper::WhisperBackend>>>,
+    scribble: Arc<Scribble<scribble::backends::whisper::WhisperBackend>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,7 +116,7 @@ async fn main() -> Result<()> {
         .context("failed to initialize Scribble backend")?;
 
     let state = AppState {
-        scribble: Arc::new(Mutex::new(scribble)),
+        scribble: Arc::new(scribble),
     };
 
     let app = Router::new()
@@ -145,8 +144,7 @@ async fn healthz() -> &'static str {
 async fn models(
     State(state): State<AppState>,
 ) -> std::result::Result<Json<ModelsResponse>, AppError> {
-    let scribble = state.scribble.lock().await;
-    let backend = scribble.backend();
+    let backend = state.scribble.backend();
 
     Ok(Json(ModelsResponse {
         default_model_key: backend.default_model_key().to_owned(),
@@ -176,9 +174,9 @@ async fn transcribe(
         incremental_min_window_seconds: query.incremental_min_window_seconds.unwrap_or(1),
     };
 
-    let mut scribble = state.scribble.lock().await;
     let mut output = Vec::new();
-    scribble
+    state
+        .scribble
         .transcribe(Cursor::new(file_bytes), &mut output, &opts)
         .map_err(|err| AppError::internal(err.to_string()))?;
 

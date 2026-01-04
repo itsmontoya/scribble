@@ -37,7 +37,7 @@ use crate::vtt_encoder::VttEncoder;
 /// - Call `transcribe` many times with different inputs and outputs.
 pub struct Scribble<B: Backend> {
     backend: B,
-    vad: Option<VadProcessor>,
+    vad_model_path: Option<String>,
 }
 
 impl Scribble<WhisperBackend> {
@@ -52,15 +52,20 @@ impl Scribble<WhisperBackend> {
     {
         let vad_model_path = vad_model_path.as_ref();
         let backend = WhisperBackend::new(model_paths, vad_model_path)?;
-        let vad = Some(VadProcessor::new(vad_model_path)?);
-        Ok(Self { backend, vad })
+        Ok(Self {
+            backend,
+            vad_model_path: Some(vad_model_path.to_owned()),
+        })
     }
 }
 
 impl<B: Backend> Scribble<B> {
     /// Create a new `Scribble` instance using a custom backend.
     pub fn with_backend(backend: B) -> Self {
-        Self { backend, vad: None }
+        Self {
+            backend,
+            vad_model_path: None,
+        }
     }
 
     /// Transcribe an input stream and write the result to an output writer.
@@ -76,7 +81,7 @@ impl<B: Backend> Scribble<B> {
     ///
     /// Note: The `Send + Sync + 'static` bounds mirror the decoder API. If you later relax
     /// those constraints in `decoder`, we can simplify these bounds too.
-    pub fn transcribe<R, W>(&mut self, r: R, w: W, opts: &Opts) -> Result<()>
+    pub fn transcribe<R, W>(&self, r: R, w: W, opts: &Opts) -> Result<()>
     where
         R: Read + Send + Sync + 'static,
         W: Write,
@@ -100,18 +105,13 @@ impl<B: Backend> Scribble<B> {
         }
     }
 
-    fn transcribe_with_encoder<R, E>(&mut self, r: R, opts: &Opts, encoder: &mut E) -> Result<()>
+    fn transcribe_with_encoder<R, E>(&self, r: R, opts: &Opts, encoder: &mut E) -> Result<()>
     where
         R: Read + Send + Sync + 'static,
         E: SegmentEncoder,
     {
-        // We borrow `backend` and the optional VAD processor separately so we can:
-        // - build the samples receiver (which may borrow the VAD processor), and then
-        // - create the backend stream (which borrows the backend).
-        //
-        // This keeps the rest of the function linear and avoids hidden lifetime gymnastics.
-        let (backend, vad_slot) = (&mut self.backend, &mut self.vad);
-        let vad = Self::get_vad(vad_slot, opts)?;
+        let backend = &self.backend;
+        let vad = Self::get_vad(self.vad_model_path.as_deref(), opts)?;
 
         // We start decoding on a dedicated thread so we can overlap I/O + decode with backend
         // inference. The main thread stays responsible for orchestration and error plumbing.
@@ -143,25 +143,35 @@ impl<B: Backend> Scribble<B> {
         }
     }
 
-    fn get_vad<'a>(
-        vad_slot: &'a mut Option<VadProcessor>,
-        opts: &Opts,
-    ) -> Result<Option<&'a mut VadProcessor>> {
+    fn get_vad(vad_model_path: Option<&str>, opts: &Opts) -> Result<Option<VadProcessor>> {
         if !opts.enable_voice_activity_detection {
             return Ok(None);
         }
 
-        vad_slot
-            .as_mut()
-            .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))
-            .map(Some)
+        let Some(vad_model_path) = vad_model_path else {
+            return Err(anyhow!(
+                "VAD is enabled, but no VAD model path is configured for this Scribble instance"
+            ));
+        };
+
+        // We initialize a fresh VAD context per transcription.
+        //
+        // Rationale:
+        // - The upstream `whisper-rs` VAD bindings currently do not mark the VAD context as
+        //   `Send`/`Sync`, making it awkward to store inside long-lived, shared server state.
+        // - Even when upstream adds the necessary guarantees, we may want per-request state
+        //   (or a pool) to enable true concurrency without a global lock.
+        //
+        // If/when the underlying library provides a clearly shareable VAD context, we can revisit
+        // this to reuse or pool VAD processors for lower latency and less per-request overhead.
+        Ok(Some(VadProcessor::new(vad_model_path)?))
     }
 
-    fn get_samples_rx<'a, R>(
+    fn get_samples_rx<R>(
         r: R,
         opts: &Opts,
-        vad: Option<&'a mut VadProcessor>,
-    ) -> Result<(SamplesRx<'a>, std::thread::JoinHandle<Result<()>>)>
+        vad: Option<VadProcessor>,
+    ) -> Result<(SamplesRx, std::thread::JoinHandle<Result<()>>)>
     where
         R: Read + Send + Sync + 'static,
     {
@@ -179,8 +189,7 @@ impl<B: Backend> Scribble<B> {
         let rx = if opts.enable_voice_activity_detection {
             // We wrap the decoder receiver so the main loop can stay unchanged when VAD is enabled.
             // `VadStreamReceiver` is responsible for buffering and flushing VAD state.
-            let vad =
-                vad.ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
+            let vad = vad.ok_or_else(|| anyhow!("VAD is enabled, but VAD failed to initialize"))?;
             let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
             SamplesRx::Vad(vad_rx)
         } else {

@@ -37,7 +37,7 @@ fn main() -> Result<()> {
     //
     // `Scribble::new` validates both model paths, so once this succeeds, we know the backend
     // is ready for repeated transcriptions.
-    let mut scribble = Scribble::new([params.model_path], params.vad_model_path)?;
+    let scribble = Scribble::new([params.model_path], params.vad_model_path)?;
 
     // Stream transcription output to stdout.
     scribble

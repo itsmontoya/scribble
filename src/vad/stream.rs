@@ -12,8 +12,8 @@ use super::VadProcessor;
 ///
 /// This type is an internal building block. The public, receiver-like surface area is
 /// [`VadStreamReceiver`], which we keep intentionally simple and predictable.
-pub struct VadStream<'a> {
-    vad: &'a mut VadProcessor,
+pub struct VadStream {
+    vad: VadProcessor,
     window_frames: usize,
     holdback_frames: usize,
     pending_tail: Vec<f32>,
@@ -22,8 +22,8 @@ pub struct VadStream<'a> {
     out_cursor: usize,
 }
 
-impl<'a> VadStream<'a> {
-    pub(crate) fn new(vad: &'a mut VadProcessor) -> Self {
+impl VadStream {
+    pub(crate) fn new(vad: VadProcessor) -> Self {
         const SAMPLE_RATE_HZ: f32 = 16_000.0;
 
         let policy = vad.policy();
@@ -133,23 +133,19 @@ impl<'a> VadStream<'a> {
 ///
 /// Call `recv()` repeatedly to get VAD-filtered chunks. When the input channel disconnects and we
 /// have flushed/drained all buffered audio, `recv()` returns an error.
-pub struct VadStreamReceiver<'a> {
+pub struct VadStreamReceiver {
     inner: mpsc::Receiver<Vec<f32>>,
-    vad: VadStream<'a>,
+    vad: VadStream,
     emit_frames: usize,
     flushed: bool,
 }
 
-impl<'a> VadStreamReceiver<'a> {
+impl VadStreamReceiver {
     /// Create a new VAD receiver wrapper.
     ///
     /// `emit_frames` controls the chunk size we yield downstream. We clamp it to at least `1`
     /// so callers don't have to handle a degenerate “0-sized chunk” mode.
-    pub fn new(
-        inner: mpsc::Receiver<Vec<f32>>,
-        vad: &'a mut VadProcessor,
-        emit_frames: usize,
-    ) -> Self {
+    pub fn new(inner: mpsc::Receiver<Vec<f32>>, vad: VadProcessor, emit_frames: usize) -> Self {
         Self {
             inner,
             vad: VadStream::new(vad),

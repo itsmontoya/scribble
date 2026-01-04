@@ -20,12 +20,12 @@ use crate::vad::VadStreamReceiver;
 /// We intentionally keep this enum small and concrete:
 /// - `Plain` is the raw decoder output channel.
 /// - `Vad` wraps that channel and yields VAD-filtered chunks.
-pub enum SamplesRx<'a> {
+pub enum SamplesRx {
     Plain(mpsc::Receiver<Vec<f32>>),
-    Vad(VadStreamReceiver<'a>),
+    Vad(VadStreamReceiver),
 }
 
-impl<'a> SamplesRx<'a> {
+impl SamplesRx {
     /// Receive the next chunk of samples.
     ///
     /// We mirror the blocking behavior of `std::sync::mpsc::Receiver::recv`.

@@ -176,7 +176,7 @@ impl Backend for WhisperBackend {
         Self: 'a;
 
     fn transcribe_full(
-        &mut self,
+        &self,
         opts: &Opts,
         encoder: &mut dyn SegmentEncoder,
         samples: &[f32],
@@ -193,7 +193,7 @@ impl Backend for WhisperBackend {
     }
 
     fn create_stream<'a>(
-        &'a mut self,
+        &'a self,
         opts: &'a Opts,
         encoder: &'a mut dyn SegmentEncoder,
     ) -> Result<Self::Stream<'a>> {
