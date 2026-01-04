@@ -14,7 +14,7 @@
 use std::io::{BufWriter, Read, Write};
 use std::sync::mpsc;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 use crate::backend::{Backend, BackendStream};
 use crate::backends::whisper::WhisperBackend;
@@ -23,6 +23,7 @@ use crate::json_array_encoder::JsonArrayEncoder;
 use crate::opts::Opts;
 use crate::output_type::OutputType;
 use crate::segment_encoder::SegmentEncoder;
+use crate::vad::{VadProcessor, VadStream};
 use crate::vtt_encoder::VttEncoder;
 
 /// The main high-level transcription entry point.
@@ -35,20 +36,22 @@ use crate::vtt_encoder::VttEncoder;
 /// - Call `transcribe` many times with different inputs and outputs.
 pub struct Scribble<B: Backend> {
     backend: B,
+    vad: Option<VadProcessor>,
 }
 
 impl Scribble<WhisperBackend> {
     /// Create a new `Scribble` instance using the built-in Whisper backend.
     pub fn new(model_path: impl AsRef<str>, vad_model_path: impl AsRef<str>) -> Result<Self> {
         let backend = WhisperBackend::new(model_path.as_ref(), vad_model_path.as_ref())?;
-        Ok(Self { backend })
+        let vad = Some(VadProcessor::new(vad_model_path.as_ref())?);
+        Ok(Self { backend, vad })
     }
 }
 
 impl<B: Backend> Scribble<B> {
     /// Create a new `Scribble` instance using a custom backend.
     pub fn with_backend(backend: B) -> Self {
-        Self { backend }
+        Self { backend, vad: None }
     }
 
     /// Transcribe an input stream and write the result to an output writer.
@@ -96,18 +99,52 @@ impl<B: Backend> Scribble<B> {
         // Streaming-friendly path: run decode on a separate thread so reading/decoding can
         // continue even while Whisper inference is running.
         let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
+        let decode_opts = StreamDecodeOpts::default();
+        let emit_frames = decode_opts.target_chunk_frames;
 
         let decode_handle = std::thread::spawn(move || -> Result<()> {
             let mut sink = ChannelSamplesSink { tx };
-            decode_to_stream_from_read(r, StreamDecodeOpts::default(), &mut sink)
+            decode_to_stream_from_read(r, decode_opts, &mut sink)
         });
 
         let mut stream = self.backend.create_stream(opts, encoder)?;
 
-        // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
-        // decode thread continues reading.
-        while let Ok(chunk) = rx.recv() {
-            let _ = stream.on_samples(&chunk)?;
+        if opts.enable_voice_activity_detection {
+            let vad = self
+                .vad
+                .as_mut()
+                .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
+
+            // Feed the backend incrementally, but buffer enough audio for VAD to be meaningful.
+            let mut vad_stream = VadStream::new(vad);
+
+            while let Ok(chunk) = rx.recv() {
+                vad_stream.push(&chunk)?;
+
+                while let Some(out_chunk) = vad_stream.peek_chunk(emit_frames) {
+                    let _ = stream.on_samples(out_chunk)?;
+                    vad_stream.consume_chunk(emit_frames);
+                }
+            }
+
+            // Flush remaining buffered audio through VAD and emit whatever is left.
+            vad_stream.flush()?;
+
+            while let Some(out_chunk) = vad_stream.peek_chunk(emit_frames) {
+                let _ = stream.on_samples(out_chunk)?;
+                vad_stream.consume_chunk(emit_frames);
+            }
+
+            if let Some(rem) = vad_stream.peek_remainder() {
+                let _ = stream.on_samples(rem)?;
+                vad_stream.consume_remainder();
+            }
+        } else {
+            // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
+            // decode thread continues reading.
+            while let Ok(chunk) = rx.recv() {
+                let _ = stream.on_samples(&chunk)?;
+            }
         }
 
         // Ensure we flush any final segments.
