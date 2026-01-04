@@ -86,7 +86,4 @@ pub mod vtt_encoder;
 // Infrastructure
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `Read` wrapper for streaming byte processing.
-pub mod pipe_reader;
-
 pub(crate) mod samples_rx;
