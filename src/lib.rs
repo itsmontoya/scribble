@@ -85,3 +85,6 @@ pub mod vtt_encoder;
 // ─────────────────────────────────────────────────────────────────────────────
 // Infrastructure
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Internal adapters used to keep the high-level transcription loop linear and explicit.
+pub(crate) mod samples_rx;

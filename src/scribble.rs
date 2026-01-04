@@ -22,8 +22,9 @@ use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_stream_from_read};
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::opts::Opts;
 use crate::output_type::OutputType;
+use crate::samples_rx::SamplesRx;
 use crate::segment_encoder::SegmentEncoder;
-use crate::vad::{VadProcessor, VadStream};
+use crate::vad::{VadProcessor, VadStreamReceiver};
 use crate::vtt_encoder::VttEncoder;
 
 /// The main high-level transcription entry point.
@@ -96,8 +97,68 @@ impl<B: Backend> Scribble<B> {
         R: Read + Send + Sync + 'static,
         E: SegmentEncoder,
     {
-        // Streaming-friendly path: run decode on a separate thread so reading/decoding can
-        // continue even while Whisper inference is running.
+        // We borrow `backend` and the optional VAD processor separately so we can:
+        // - build the samples receiver (which may borrow the VAD processor), and then
+        // - create the backend stream (which borrows the backend).
+        //
+        // This keeps the rest of the function linear and avoids hidden lifetime gymnastics.
+        let (backend, vad_slot) = (&mut self.backend, &mut self.vad);
+        let vad = Self::get_vad(vad_slot, opts)?;
+
+        // We start decoding on a dedicated thread so we can overlap I/O + decode with backend
+        // inference. The main thread stays responsible for orchestration and error plumbing.
+        let (mut rx, decode_handle) = Self::get_samples_rx(r, opts, vad)?;
+
+        let mut stream = backend.create_stream(opts, encoder)?;
+
+        // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
+        // decode thread continues reading.
+        while let Ok(chunk) = rx.recv() {
+            let _ = stream.on_samples(&chunk)?;
+        }
+
+        // We always ask the backend stream to finish so it can flush any buffered segments.
+        let finish_res = stream.finish();
+
+        // If decode failed, we surface that error (but still prefer a backend/transcription error
+        // if both happened). This keeps failure reporting stable and unsurprising.
+        let decode_res: Result<()> = match decode_handle.join() {
+            Ok(res) => res,
+            Err(_) => Err(anyhow::anyhow!("audio decoder thread panicked")),
+        };
+
+        match (finish_res, decode_res) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Ok(()), Err(err)) => Err(err),
+            (Err(err), Ok(())) => Err(err),
+            (Err(err), Err(decode_err)) => Err(err.context(decode_err)),
+        }
+    }
+
+    fn get_vad<'a>(
+        vad_slot: &'a mut Option<VadProcessor>,
+        opts: &Opts,
+    ) -> Result<Option<&'a mut VadProcessor>> {
+        if !opts.enable_voice_activity_detection {
+            return Ok(None);
+        }
+
+        vad_slot
+            .as_mut()
+            .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))
+            .map(Some)
+    }
+
+    fn get_samples_rx<'a, R>(
+        r: R,
+        opts: &Opts,
+        vad: Option<&'a mut VadProcessor>,
+    ) -> Result<(SamplesRx<'a>, std::thread::JoinHandle<Result<()>>)>
+    where
+        R: Read + Send + Sync + 'static,
+    {
+        // We use a bounded channel to keep memory usage predictable if the backend is slower than
+        // decoding. This also makes backpressure explicit rather than relying on unbounded queues.
         let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
         let decode_opts = StreamDecodeOpts::default();
         let emit_frames = decode_opts.target_chunk_frames;
@@ -107,61 +168,18 @@ impl<B: Backend> Scribble<B> {
             decode_to_stream_from_read(r, decode_opts, &mut sink)
         });
 
-        let mut stream = self.backend.create_stream(opts, encoder)?;
-
-        if opts.enable_voice_activity_detection {
-            let vad = self
-                .vad
-                .as_mut()
-                .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
-
-            // Feed the backend incrementally, but buffer enough audio for VAD to be meaningful.
-            let mut vad_stream = VadStream::new(vad);
-
-            while let Ok(chunk) = rx.recv() {
-                vad_stream.push(&chunk)?;
-
-                while let Some(out_chunk) = vad_stream.peek_chunk(emit_frames) {
-                    let _ = stream.on_samples(out_chunk)?;
-                    vad_stream.consume_chunk(emit_frames);
-                }
-            }
-
-            // Flush remaining buffered audio through VAD and emit whatever is left.
-            vad_stream.flush()?;
-
-            while let Some(out_chunk) = vad_stream.peek_chunk(emit_frames) {
-                let _ = stream.on_samples(out_chunk)?;
-                vad_stream.consume_chunk(emit_frames);
-            }
-
-            if let Some(rem) = vad_stream.peek_remainder() {
-                let _ = stream.on_samples(rem)?;
-                vad_stream.consume_remainder();
-            }
+        let rx = if opts.enable_voice_activity_detection {
+            // We wrap the decoder receiver so the main loop can stay unchanged when VAD is enabled.
+            // `VadStreamReceiver` is responsible for buffering and flushing VAD state.
+            let vad =
+                vad.ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
+            let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
+            SamplesRx::Vad(vad_rx)
         } else {
-            // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
-            // decode thread continues reading.
-            while let Ok(chunk) = rx.recv() {
-                let _ = stream.on_samples(&chunk)?;
-            }
-        }
-
-        // Ensure we flush any final segments.
-        let finish_res = stream.finish();
-
-        // If decode failed, surface that error (but still prefer a transcription error if present).
-        let decode_res: Result<()> = match decode_handle.join() {
-            Ok(res) => res,
-            Err(_) => Err(anyhow::anyhow!("decoder thread panicked")),
+            SamplesRx::Plain(rx)
         };
 
-        match (finish_res, decode_res) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Ok(()), Err(err)) => Err(err),
-            (Err(err), Ok(())) => Err(err),
-            (Err(err), Err(decode_err)) => Err(err.context(decode_err)),
-        }
+        Ok((rx, decode_handle))
     }
 
     /// Access the configured backend.
