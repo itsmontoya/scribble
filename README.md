@@ -14,14 +14,14 @@ Scribble will demux/decode **audio *or* video containers** (MP4, MP3, WAV, FLAC,
 ## Demo
 <img src="https://github.com/itsmontoya/scribble/blob/main/demo/demo.gif?raw=true" />
 
-## Goals
+## Project goals
 
-- Provide a clean, idiomatic Rust API for audio transcription  
-- Support multiple output formats (JSON, VTT, plain text, etc.)  
-- Work equally well as a CLI tool or embedded service  
-- **Be streaming-first:** designed to support incremental, chunk-based transcription pipelines (live audio, long-running streams, and low-latency workflows)  
-- **Enable composable pipelines:** VAD → transcription → encoding, with clear extension points for streaming and real-time use cases  
-- Keep the core simple, explicit, and easy to extend  
+- Provide a clean, idiomatic Rust API for audio transcription
+- Support multiple output formats (JSON, VTT, plain text, etc.)
+- Work equally well as a CLI tool or embedded library
+- **Be streaming-first:** designed to support incremental, chunk-based transcription pipelines (live audio, long-running streams, and low-latency workflows)
+- **Enable composable pipelines:** VAD → transcription → encoding, with clear extension points for streaming and real-time use cases
+- Keep the core simple, explicit, and easy to extend
 
 > Scribble is built with **streaming and real-time transcription** in mind, even when operating on static files today.
 
@@ -187,12 +187,14 @@ let json = String::from_utf8(output)?;
 println!("{json}");
 ```
 
-## TODOs
+## Goals
 
-- Expand testing (goal of 80%+ test coverage)
-- Update VAD to utilize streaming approach
-- Implement the webserver
-- Streaming / incremental transcription support
+- [X] Make VAD streaming-capable
+- [X] Support streaming and incremental transcription
+- [X] Select the primary audio track in multi-track video containers
+- [ ] Implement a web server
+- [ ] Expand test coverage to 80%+
+- [ ] Improve observability (structured logs, progress, metrics hooks)
 
 ## Status
 
