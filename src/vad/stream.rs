@@ -1,4 +1,6 @@
-use anyhow::Result;
+use std::sync::mpsc;
+
+use anyhow::{Result, anyhow};
 
 use super::VadProcessor;
 
@@ -117,6 +119,55 @@ impl<'a> VadStream<'a> {
         }
 
         Ok(())
+    }
+}
+
+/// Adapter that turns a `Receiver<Vec<f32>>` into a VAD-processed receiver-like stream.
+///
+/// Call `recv()` repeatedly to get VAD-filtered chunks. When the input channel disconnects and all
+/// buffered audio is drained, `recv()` returns an error.
+pub struct VadStreamReceiver<'a> {
+    inner: mpsc::Receiver<Vec<f32>>,
+    vad: VadStream<'a>,
+    emit_frames: usize,
+    flushed: bool,
+}
+
+impl<'a> VadStreamReceiver<'a> {
+    pub fn new(inner: mpsc::Receiver<Vec<f32>>, vad: VadStream<'a>, emit_frames: usize) -> Self {
+        Self {
+            inner,
+            vad,
+            emit_frames: emit_frames.max(1),
+            flushed: false,
+        }
+    }
+
+    pub fn recv(&mut self) -> Result<Vec<f32>> {
+        loop {
+            if let Some(chunk) = self.vad.peek_chunk(self.emit_frames) {
+                let out = chunk.to_vec();
+                self.vad.consume_chunk(self.emit_frames);
+                return Ok(out);
+            }
+
+            if self.flushed {
+                if let Some(rem) = self.vad.peek_remainder() {
+                    let out = rem.to_vec();
+                    self.vad.consume_remainder();
+                    return Ok(out);
+                }
+                return Err(anyhow!("vad input channel disconnected"));
+            }
+
+            match self.inner.recv() {
+                Ok(chunk) => self.vad.push(&chunk)?,
+                Err(_) => {
+                    self.vad.flush()?;
+                    self.flushed = true;
+                }
+            }
+        }
     }
 }
 
