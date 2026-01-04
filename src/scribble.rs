@@ -24,7 +24,7 @@ use crate::opts::Opts;
 use crate::output_type::OutputType;
 use crate::samples_rx::SamplesRx;
 use crate::segment_encoder::SegmentEncoder;
-use crate::vad::{VadProcessor, VadStream, VadStreamReceiver};
+use crate::vad::{VadProcessor, VadStreamReceiver};
 use crate::vtt_encoder::VttEncoder;
 
 /// The main high-level transcription entry point.
@@ -117,7 +117,7 @@ impl<B: Backend> Scribble<B> {
                 .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
 
             // Feed the backend incrementally, but buffer enough audio for VAD to be meaningful.
-            let vad_rx = VadStreamReceiver::new(rx, VadStream::new(vad), emit_frames);
+            let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
             SamplesRx::Vad(vad_rx)
         } else {
             SamplesRx::Plain(rx)

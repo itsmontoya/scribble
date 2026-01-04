@@ -20,7 +20,7 @@ pub struct VadStream<'a> {
 }
 
 impl<'a> VadStream<'a> {
-    pub fn new(vad: &'a mut VadProcessor) -> Self {
+    pub(crate) fn new(vad: &'a mut VadProcessor) -> Self {
         const SAMPLE_RATE_HZ: f32 = 16_000.0;
 
         let policy = vad.policy();
@@ -134,10 +134,14 @@ pub struct VadStreamReceiver<'a> {
 }
 
 impl<'a> VadStreamReceiver<'a> {
-    pub fn new(inner: mpsc::Receiver<Vec<f32>>, vad: VadStream<'a>, emit_frames: usize) -> Self {
+    pub fn new(
+        inner: mpsc::Receiver<Vec<f32>>,
+        vad: &'a mut VadProcessor,
+        emit_frames: usize,
+    ) -> Self {
         Self {
             inner,
-            vad,
+            vad: VadStream::new(vad),
             emit_frames: emit_frames.max(1),
             flushed: false,
         }
