@@ -97,31 +97,21 @@ impl<B: Backend> Scribble<B> {
         R: Read + Send + Sync + 'static,
         E: SegmentEncoder,
     {
-        // Streaming-friendly path: run decode on a separate thread so reading/decoding can
-        // continue even while Whisper inference is running.
-        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
-        let decode_opts = StreamDecodeOpts::default();
-        let emit_frames = decode_opts.target_chunk_frames;
+        let (backend, vad_slot) = (&mut self.backend, &mut self.vad);
 
-        let decode_handle = std::thread::spawn(move || -> Result<()> {
-            let mut sink = ChannelSamplesSink { tx };
-            decode_to_stream_from_read(r, decode_opts, &mut sink)
-        });
-
-        let mut stream = self.backend.create_stream(opts, encoder)?;
-
-        let mut rx = if opts.enable_voice_activity_detection {
-            let vad = self
-                .vad
-                .as_mut()
-                .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
-
-            // Feed the backend incrementally, but buffer enough audio for VAD to be meaningful.
-            let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
-            SamplesRx::Vad(vad_rx)
+        let vad = if opts.enable_voice_activity_detection {
+            Some(
+                vad_slot
+                    .as_mut()
+                    .ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?,
+            )
         } else {
-            SamplesRx::Plain(rx)
+            None
         };
+
+        let (mut rx, decode_handle) = Self::get_samples_rx(r, opts, vad)?;
+
+        let mut stream = backend.create_stream(opts, encoder)?;
 
         // Consume decoded chunks as they arrive. This can run Whisper and emit segments while the
         // decode thread continues reading.
@@ -144,6 +134,37 @@ impl<B: Backend> Scribble<B> {
             (Err(err), Ok(())) => Err(err),
             (Err(err), Err(decode_err)) => Err(err.context(decode_err)),
         }
+    }
+
+    fn get_samples_rx<'a, R>(
+        r: R,
+        opts: &Opts,
+        vad: Option<&'a mut VadProcessor>,
+    ) -> Result<(SamplesRx<'a>, std::thread::JoinHandle<Result<()>>)>
+    where
+        R: Read + Send + Sync + 'static,
+    {
+        // Streaming-friendly path: run decode on a separate thread so reading/decoding can
+        // continue even while Whisper inference is running.
+        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
+        let decode_opts = StreamDecodeOpts::default();
+        let emit_frames = decode_opts.target_chunk_frames;
+
+        let decode_handle = std::thread::spawn(move || -> Result<()> {
+            let mut sink = ChannelSamplesSink { tx };
+            decode_to_stream_from_read(r, decode_opts, &mut sink)
+        });
+
+        let rx = if opts.enable_voice_activity_detection {
+            // Feed the backend incrementally, but buffer enough audio for VAD to be meaningful.
+            let vad = vad.ok_or_else(|| anyhow!("VAD is enabled, but no VAD processor is configured"))?;
+            let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
+            SamplesRx::Vad(vad_rx)
+        } else {
+            SamplesRx::Plain(rx)
+        };
+
+        Ok((rx, decode_handle))
     }
 
     /// Access the configured backend.
