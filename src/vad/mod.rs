@@ -5,8 +5,8 @@
 
 mod processor;
 mod stream;
-mod vad;
+mod to_speech;
 
 pub use processor::VadProcessor;
 pub use stream::VadStream;
-pub use vad::{DEFAULT_VAD_POLICY, VadPolicy};
+pub use to_speech::{DEFAULT_VAD_POLICY, VadPolicy};

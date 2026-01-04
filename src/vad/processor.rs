@@ -1,7 +1,7 @@
 use anyhow::Result;
 use whisper_rs::{WhisperVadContext, WhisperVadContextParams};
 
-use super::vad::{DEFAULT_VAD_POLICY, VadPolicy, to_speech_only_with_policy};
+use super::to_speech::{DEFAULT_VAD_POLICY, VadPolicy, to_speech_only_with_policy};
 
 /// Voice Activity Detection (VAD) processor.
 ///
