@@ -110,6 +110,18 @@ impl WhisperBackend {
         &self.vad_model_path
     }
 
+    /// The model key used when `Opts::model_key` is `None`.
+    pub fn default_model_key(&self) -> &str {
+        self.first_model_key.as_str()
+    }
+
+    /// List available model keys (sorted).
+    pub fn model_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.models.keys().cloned().collect();
+        keys.sort_unstable();
+        keys
+    }
+
     fn model_key_from_path(model_path: &str) -> Result<String> {
         let path = Path::new(model_path);
         let Some(file_name) = path.file_name() else {
