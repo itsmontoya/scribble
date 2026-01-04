@@ -165,7 +165,7 @@ use scribble::{opts::Opts, output_type::OutputType, scribble::Scribble};
 use std::fs::File;
 
 let mut scribble = Scribble::new(
-    "./models/ggml-large-v3-turbo.bin",
+    ["./models/ggml-large-v3-turbo.bin"],
     "./models/ggml-silero-v6.2.0.bin",
 )?;
 
@@ -173,6 +173,7 @@ let mut input = File::open("audio.wav")?;
 let mut output = Vec::new();
 
 let opts = Opts {
+    model_key: None,
     enable_translate_to_english: false,
     enable_voice_activity_detection: true,
     language: None,

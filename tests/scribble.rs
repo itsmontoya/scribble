@@ -24,7 +24,7 @@ fn new_scribble_or_skip() -> anyhow::Result<Option<Scribble<WhisperBackend>>> {
         return Ok(None);
     }
 
-    Ok(Some(Scribble::new(WHISPER_MODEL, VAD_MODEL)?))
+    Ok(Some(Scribble::new([WHISPER_MODEL], VAD_MODEL)?))
 }
 
 fn run_to_json(scribble: &mut Scribble<WhisperBackend>, opts: &Opts) -> anyhow::Result<String> {
@@ -52,6 +52,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
         (
             "default",
             Opts {
+                model_key: None,
                 enable_translate_to_english: false,
                 enable_voice_activity_detection: false,
                 language: None,
@@ -62,6 +63,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
         (
             "with_vad",
             Opts {
+                model_key: None,
                 enable_translate_to_english: false,
                 enable_voice_activity_detection: true,
                 language: None,
@@ -72,6 +74,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
         (
             "with_language",
             Opts {
+                model_key: None,
                 enable_translate_to_english: false,
                 enable_voice_activity_detection: false,
                 language: Some("en".to_string()),
@@ -82,6 +85,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
         (
             "with_vad_and_language",
             Opts {
+                model_key: None,
                 enable_translate_to_english: false,
                 enable_voice_activity_detection: true,
                 language: Some("en".to_string()),
