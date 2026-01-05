@@ -123,3 +123,59 @@ pub async fn track_http_metrics(req: Request<Body>, next: Next) -> Response {
 
     response
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_is_idempotent_and_registers_metrics() {
+        init();
+        init();
+
+        metrics()
+            .http_requests_total
+            .with_label_values(&["200"])
+            .inc();
+        metrics()
+            .http_request_duration_seconds
+            .with_label_values(&["200"])
+            .observe(0.001);
+        metrics().http_in_flight_requests.inc();
+
+        let families = metrics().registry.gather();
+        let names: Vec<&str> = families.iter().map(|f| f.get_name()).collect();
+        assert!(names.contains(&"scribble_http_requests_total"));
+        assert!(names.contains(&"scribble_http_request_duration_seconds"));
+        assert!(names.contains(&"scribble_http_in_flight_requests"));
+    }
+
+    #[tokio::test]
+    async fn prometheus_metrics_returns_text_format() -> anyhow::Result<()> {
+        init();
+        metrics()
+            .http_requests_total
+            .with_label_values(&["200"])
+            .inc();
+        metrics()
+            .http_request_duration_seconds
+            .with_label_values(&["200"])
+            .observe(0.001);
+
+        let resp = prometheus_metrics().await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get(header::CONTENT_TYPE)
+                .expect("content-type header")
+                .to_str()?,
+            "text/plain; version=0.0.4; charset=utf-8"
+        );
+
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await?;
+        let text = std::str::from_utf8(&bytes)?;
+        assert!(text.contains("scribble_http_requests_total"));
+        Ok(())
+    }
+}
