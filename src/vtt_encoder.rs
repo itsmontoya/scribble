@@ -1,6 +1,6 @@
-use anyhow::Result;
 use std::io::Write;
 
+use crate::Result;
 use crate::segment_encoder::SegmentEncoder;
 use crate::segments::Segment;
 
@@ -47,7 +47,9 @@ impl<W: Write> SegmentEncoder for VttEncoder<W> {
     /// Write a single cue in WebVTT format.
     fn write_segment(&mut self, seg: &Segment) -> Result<()> {
         if self.closed {
-            anyhow::bail!("cannot write segment: encoder is already closed");
+            return Err(crate::Error::msg(
+                "cannot write segment: encoder is already closed",
+            ));
         }
 
         self.start_if_needed()?;

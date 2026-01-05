@@ -14,8 +14,9 @@
 use std::io::{BufWriter, Read, Write};
 use std::sync::mpsc;
 
-use anyhow::{Result, anyhow};
+use anyhow::anyhow;
 
+use crate::Result;
 use crate::backend::{Backend, BackendStream};
 use crate::backends::whisper::WhisperBackend;
 use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_stream_from_read};
@@ -131,14 +132,16 @@ impl<B: Backend> Scribble<B> {
         // if both happened). This keeps failure reporting stable and unsurprising.
         let decode_res: Result<()> = match decode_handle.join() {
             Ok(res) => res,
-            Err(_) => Err(anyhow::anyhow!("audio decoder thread panicked")),
+            Err(_) => Err(anyhow::anyhow!("audio decoder thread panicked").into()),
         };
 
         match (finish_res, decode_res) {
             (Ok(()), Ok(())) => Ok(()),
             (Ok(()), Err(err)) => Err(err),
             (Err(err), Ok(())) => Err(err),
-            (Err(err), Err(decode_err)) => Err(err.context(decode_err)),
+            (Err(err), Err(decode_err)) => Err(anyhow::Error::from(err)
+                .context(format!("{decode_err:#}"))
+                .into()),
         }
     }
 
@@ -150,7 +153,8 @@ impl<B: Backend> Scribble<B> {
         let Some(vad_model_path) = vad_model_path else {
             return Err(anyhow!(
                 "VAD is enabled, but no VAD model path is configured for this Scribble instance"
-            ));
+            )
+            .into());
         };
 
         // We initialize a fresh VAD context per transcription.
@@ -182,7 +186,7 @@ impl<B: Backend> Scribble<B> {
 
         let decode_handle = std::thread::spawn(move || -> Result<()> {
             let mut sink = ChannelSamplesSink { tx };
-            decode_to_stream_from_read(r, decode_opts, &mut sink)
+            decode_to_stream_from_read(r, decode_opts, &mut sink).map_err(Into::into)
         });
 
         let rx = if opts.enable_voice_activity_detection {
@@ -214,7 +218,9 @@ fn merge_run_and_close(run_res: Result<()>, close_res: Result<()>) -> Result<()>
         (Ok(()), Ok(())) => Ok(()),
         (Ok(()), Err(close_err)) => Err(close_err),
         (Err(err), Ok(())) => Err(err),
-        (Err(err), Err(close_err)) => Err(err.context(close_err)),
+        (Err(err), Err(close_err)) => Err(anyhow::Error::from(err)
+            .context(format!("{close_err:#}"))
+            .into()),
     }
 }
 
@@ -223,7 +229,7 @@ struct ChannelSamplesSink {
 }
 
 impl SamplesSink for ChannelSamplesSink {
-    fn on_samples(&mut self, samples_16k_mono: &[f32]) -> Result<bool> {
+    fn on_samples(&mut self, samples_16k_mono: &[f32]) -> anyhow::Result<bool> {
         // Copy into an owned buffer so the decoder thread can send it across threads safely.
         // Whisper inference runs on the receiver side.
         let buf = samples_16k_mono.to_vec();
@@ -291,16 +297,16 @@ mod tests {
     fn merge_run_and_close_prefers_run_error() {
         let run_err = anyhow::anyhow!("run failed");
         let close_err = anyhow::anyhow!("close failed");
-        let err = merge_run_and_close(Err(run_err), Err(close_err)).unwrap_err();
-        let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
-        assert!(chain.iter().any(|s| s.contains("close failed")));
-        assert!(chain.iter().any(|s| s.contains("run failed")));
+        let err = merge_run_and_close(Err(run_err.into()), Err(close_err.into())).unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("close failed"));
+        assert!(s.contains("run failed"));
     }
 
     #[test]
     fn merge_run_and_close_surfaces_close_error_when_run_ok() {
         let close_err = anyhow::anyhow!("close failed");
-        let err = merge_run_and_close(Ok(()), Err(close_err)).unwrap_err();
+        let err = merge_run_and_close(Ok(()), Err(close_err.into())).unwrap_err();
         assert!(err.to_string().contains("close failed"));
     }
 
@@ -347,7 +353,7 @@ mod tests {
         }
 
         fn finish(&mut self) -> Result<()> {
-            Err(anyhow::anyhow!("finish failed"))
+            Err(anyhow::anyhow!("finish failed").into())
         }
     }
 
@@ -424,13 +430,9 @@ mod tests {
         let err = scribble
             .transcribe_with_encoder(input, &opts, &mut encoder)
             .unwrap_err();
-        let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
-        assert!(chain.iter().any(|s| s.contains("finish failed")));
-        assert!(
-            chain
-                .iter()
-                .any(|s| s.contains("failed to probe media stream"))
-        );
+        let s = err.to_string();
+        assert!(s.contains("finish failed"));
+        assert!(s.contains("failed to probe media stream"));
     }
 
     struct PanicRead;

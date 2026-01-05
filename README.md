@@ -32,6 +32,10 @@ Scribble will demux/decode **audio *or* video containers** (MP4, MP3, WAV, FLAC,
 
 ## Installation
 
+### Minimum supported Rust
+
+Scribble targets Rust **1.92.0** (pinned in `rust-toolchain.toml`, declared as `rust-version = "1.92"` in `Cargo.toml`).
+
 Clone the repository and build the binaries:
 
 ```bash
@@ -286,6 +290,8 @@ cargo llvm-cov --all-features --all-targets --html
 ## Status
 
 Scribble is under active development. The API is not yet stable, but the foundations are in place and evolving quickly.
+
+Release notes live in `CHANGELOG.md` (and GitHub Releases).
 
 ## Contributing
 

@@ -1,6 +1,6 @@
-use anyhow::Result;
 use std::io::Write;
 
+use crate::Result;
 use crate::segment_encoder::SegmentEncoder;
 use crate::segments::Segment;
 
@@ -67,7 +67,9 @@ impl<W: Write> SegmentEncoder for JsonArrayEncoder<W> {
     /// Serialize a single segment and append it to the JSON array.
     fn write_segment(&mut self, seg: &Segment) -> Result<()> {
         if self.closed {
-            anyhow::bail!("cannot write segment: encoder is already closed");
+            return Err(crate::Error::msg(
+                "cannot write segment: encoder is already closed",
+            ));
         }
 
         // Ensure the JSON array has been started.

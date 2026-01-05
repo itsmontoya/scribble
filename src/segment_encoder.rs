@@ -1,5 +1,4 @@
-use anyhow::Result;
-
+use crate::Result;
 use crate::segments::Segment;
 
 /// A streaming encoder for transcription segments.

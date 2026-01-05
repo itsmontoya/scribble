@@ -165,7 +165,9 @@ impl<'a> BufferedSegmentTranscriber<'a> {
 
             let mut segment = to_segment(whisper_segment)?;
             apply_time_offset(&mut segment, offset_seconds);
-            self.encoder.write_segment(&segment)?;
+            self.encoder
+                .write_segment(&segment)
+                .map_err(anyhow::Error::new)?;
         }
 
         // Advance by the end timestamp of the last emitted segment.
