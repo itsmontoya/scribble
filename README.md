@@ -7,7 +7,7 @@
 
 Scribble is a fast, lightweight transcription engine written in Rust, with a built-in Whisper backend and a backend trait for custom implementations.
 
-![billboard](https://github.com/itsmontoya/scribble/blob/main/banner.png?raw=true "Scribble billboard")
+![banner](https://github.com/itsmontoya/scribble/blob/main/banner.png?raw=true "Scribble banner")
 
 Scribble will demux/decode **audio *or* video containers** (MP4, MP3, WAV, FLAC, OGG, WebM, MKV, etc.), downmix to mono, and resample to 16 kHz — no preprocessing required.
 
@@ -242,3 +242,5 @@ Scribble is under active development. The API is not yet stable, but the foundat
 ## License
 
 MIT
+
+![footer](https://github.com/itsmontoya/scribble/blob/main/footer.png?raw=true "Scribble footer")
