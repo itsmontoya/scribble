@@ -79,11 +79,10 @@ impl<B: Backend> Scribble<B> {
     /// We decode audio into a mono 16kHz stream (whisper.cpp’s expected format) using the
     /// `decoder` module, optionally apply VAD, and then run Whisper and encode segments.
     ///
-    /// Note: The `Send + Sync + 'static` bounds mirror the decoder API. If you later relax
-    /// those constraints in `decoder`, we can simplify these bounds too.
+    /// Note: The `Send + 'static` bounds mirror the decoder API.
     pub fn transcribe<R, W>(&self, r: R, w: W, opts: &Opts) -> Result<()>
     where
-        R: Read + Send + Sync + 'static,
+        R: Read + Send + 'static,
         W: Write,
     {
         // Buffer output for efficiency (especially important for stdout).
@@ -107,7 +106,7 @@ impl<B: Backend> Scribble<B> {
 
     fn transcribe_with_encoder<R, E>(&self, r: R, opts: &Opts, encoder: &mut E) -> Result<()>
     where
-        R: Read + Send + Sync + 'static,
+        R: Read + Send + 'static,
         E: SegmentEncoder,
     {
         let backend = &self.backend;
@@ -173,7 +172,7 @@ impl<B: Backend> Scribble<B> {
         vad: Option<VadProcessor>,
     ) -> Result<(SamplesRx, std::thread::JoinHandle<Result<()>>)>
     where
-        R: Read + Send + Sync + 'static,
+        R: Read + Send + 'static,
     {
         // We use a bounded channel to keep memory usage predictable if the backend is slower than
         // decoding. This also makes backpressure explicit rather than relying on unbounded queues.
