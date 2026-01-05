@@ -30,7 +30,7 @@ fn metrics() -> &'static Metrics {
                 "scribble_http_requests_total",
                 "Total HTTP requests served by scribble-server.",
             ),
-            &["method", "path", "status"],
+            &["status"],
         )
         .expect("metrics definition must be valid");
 
@@ -39,7 +39,7 @@ fn metrics() -> &'static Metrics {
                 "scribble_http_request_duration_seconds",
                 "HTTP request latency in seconds.",
             ),
-            &["method", "path"],
+            &["status"],
         )
         .expect("metrics definition must be valid");
 
@@ -105,7 +105,6 @@ pub async fn track_http_metrics(req: Request<Body>, next: Next) -> Response {
         return next.run(req).await;
     }
 
-    let method = req.method().as_str().to_owned();
     let start = Instant::now();
 
     metrics().http_in_flight_requests.inc();
@@ -115,11 +114,11 @@ pub async fn track_http_metrics(req: Request<Body>, next: Next) -> Response {
     let status = response.status().as_u16().to_string();
     metrics()
         .http_requests_total
-        .with_label_values(&[&method, &route, &status])
+        .with_label_values(&[&status])
         .inc();
     metrics()
         .http_request_duration_seconds
-        .with_label_values(&[&method, &route])
+        .with_label_values(&[&status])
         .observe(start.elapsed().as_secs_f64());
 
     response
