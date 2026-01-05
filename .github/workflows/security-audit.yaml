@@ -25,11 +25,10 @@ jobs:
       - name: Install Rust (toolchain file)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.85.0
+          toolchain: 1.92.0
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@cargo-audit
 
       - name: Audit dependencies
         run: cargo audit --deny warnings
-
