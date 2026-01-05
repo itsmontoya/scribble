@@ -246,8 +246,9 @@ println!("{json}");
 - [X] Support streaming and incremental transcription
 - [X] Select the primary audio track in multi-track video containers
 - [X] Implement a web server
+- [X] Add Prometheus metrics endpoint
+- [ ] Add structured logs (tracing)
 - [ ] Expand test coverage to 80%+
-- [ ] Improve observability (structured logs, progress, metrics hooks)
 
 ## Status
 
