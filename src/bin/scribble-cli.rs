@@ -37,7 +37,7 @@ fn main() -> Result<()> {
     //
     // `Scribble::new` validates both model paths, so once this succeeds, we know the backend
     // is ready for repeated transcriptions.
-    let mut scribble = Scribble::new([params.model_path], params.vad_model_path)?;
+    let scribble = Scribble::new([params.model_path], params.vad_model_path)?;
 
     // Stream transcription output to stdout.
     scribble
@@ -49,13 +49,13 @@ fn main() -> Result<()> {
 
 /// Open an input source as a boxed reader.
 ///
-/// We return `Box<dyn Read + Send + Sync>` because the decoder pipeline may require
-/// those bounds for its internal threading/ownership model.
+/// We return `Box<dyn Read + Send>` because the decoder pipeline moves the reader to a
+/// dedicated decode thread.
 ///
 /// For stdin:
 /// - We use `io::stdin()` directly (not a lock guard).
 /// - This stays streaming-friendly and avoids temp files.
-fn open_input(path: &str) -> Result<Box<dyn Read + Send + Sync>> {
+fn open_input(path: &str) -> Result<Box<dyn Read + Send>> {
     if path == "-" {
         Ok(Box::new(io::stdin()))
     } else {

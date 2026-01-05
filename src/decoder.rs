@@ -14,6 +14,7 @@
 //! `decode_to_stream_from_reader(Read + Seek)` variant using a seekable `MediaSource`.
 
 use std::io::Read;
+use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use symphonia::core::io::{MediaSource, ReadOnlySource};
@@ -65,9 +66,11 @@ pub fn decode_to_stream_from_read<R>(
     sink: &mut dyn SamplesSink,
 ) -> Result<()>
 where
-    R: Read + Send + Sync + 'static,
+    R: Read + Send + 'static,
 {
-    let source = ReadOnlySource::new(reader);
+    // Symphonia's `MediaSource` is `Read + Send + Sync`. We only need to *move* the reader to the
+    // decode thread (not share it concurrently), so we wrap it in a mutex to satisfy `Sync`.
+    let source = ReadOnlySource::new(LockedRead::new(reader));
     decode_impl(Box::new(source), opts, sink)
 }
 
@@ -112,4 +115,25 @@ fn decode_impl(
         .context("audio pipeline failed during finalize")?;
 
     Ok(())
+}
+
+struct LockedRead<R> {
+    inner: Mutex<R>,
+}
+
+impl<R> LockedRead<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner: Mutex::new(inner),
+        }
+    }
+}
+
+impl<R: Read> Read for LockedRead<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner
+            .lock()
+            .map_err(|_| std::io::Error::other("decoder input mutex poisoned"))?
+            .read(buf)
+    }
 }

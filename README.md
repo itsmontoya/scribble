@@ -36,6 +36,7 @@ cargo build --release
 This will produce the following binaries:
 
 - `scribble-cli` — transcribe audio/video (decodes + normalizes to mono 16 kHz)
+- `scribble-server` — HTTP server for transcription
 - `model-downloader` — download Whisper and VAD models
 
 ## model-downloader
@@ -105,6 +106,44 @@ cargo run --bin scribble-cli -- \
 ```
 
 Output is written to `stdout` in WebVTT format by default.
+
+## scribble-server
+
+`scribble-server` is a long-running HTTP server that loads models once and accepts transcription requests over HTTP.
+
+### Start the server
+
+```bash
+cargo run --bin scribble-server -- \
+  --model ./models/ggml-large-v3-turbo.bin \
+  --vad-model ./models/ggml-silero-v6.2.0.bin \
+  --host 127.0.0.1 \
+  --port 8080
+```
+
+### Transcribe via HTTP (multipart upload)
+
+```bash
+curl -sS --data-binary @./input.mp4 \
+  "http://127.0.0.1:8080/v1/transcribe?output=vtt" \
+  > transcript.vtt
+```
+
+For JSON output:
+
+```bash
+curl -sS --data-binary @./input.wav \
+  "http://127.0.0.1:8080/v1/transcribe?output=json" \
+  > transcript.json
+```
+
+Example using all query params:
+
+```bash
+curl -sS --data-binary @./input.mp4 \
+  "http://127.0.0.1:8080/v1/transcribe?output=json&output_type=json&model_key=ggml-large-v3-turbo.bin&enable_vad=true&translate_to_english=true&language=en" \
+  > transcript.json
+```
 
 ### JSON output
 
@@ -192,7 +231,7 @@ println!("{json}");
 - [X] Make VAD streaming-capable
 - [X] Support streaming and incremental transcription
 - [X] Select the primary audio track in multi-track video containers
-- [ ] Implement a web server
+- [X] Implement a web server
 - [ ] Expand test coverage to 80%+
 - [ ] Improve observability (structured logs, progress, metrics hooks)
 
