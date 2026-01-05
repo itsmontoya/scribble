@@ -49,13 +49,13 @@ fn main() -> Result<()> {
 
 /// Open an input source as a boxed reader.
 ///
-/// We return `Box<dyn Read + Send + Sync>` because the decoder pipeline may require
-/// those bounds for its internal threading/ownership model.
+/// We return `Box<dyn Read + Send>` because the decoder pipeline moves the reader to a
+/// dedicated decode thread.
 ///
 /// For stdin:
 /// - We use `io::stdin()` directly (not a lock guard).
 /// - This stays streaming-friendly and avoids temp files.
-fn open_input(path: &str) -> Result<Box<dyn Read + Send + Sync>> {
+fn open_input(path: &str) -> Result<Box<dyn Read + Send>> {
     if path == "-" {
         Ok(Box::new(io::stdin()))
     } else {
