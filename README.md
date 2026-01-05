@@ -239,6 +239,10 @@ println!("{json}");
 
 Scribble is under active development. The API is not yet stable, but the foundations are in place and evolving quickly.
 
+## Contributing
+
+See [`STYLEGUIDE.md`](STYLEGUIDE.md) for code style and repository conventions.
+
 ## License
 
 MIT
