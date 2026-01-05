@@ -21,6 +21,7 @@ use segments::emit_segments;
 /// Built-in backend powered by `whisper-rs` / `whisper.cpp`.
 pub struct WhisperBackend {
     first_model_key: String,
+    first_model: WhisperContext,
     models: HashMap<String, WhisperContext>,
     vad_model_path: String,
 }
@@ -67,6 +68,7 @@ impl WhisperBackend {
         );
 
         let mut first_model_key: Option<String> = None;
+        let mut first_model: Option<WhisperContext> = None;
         let mut models = HashMap::new();
 
         for model_path in model_paths {
@@ -75,22 +77,27 @@ impl WhisperBackend {
 
             let model_key = Self::model_key_from_path(model_path)?;
             ensure!(
-                !models.contains_key(&model_key),
+                first_model_key.as_deref() != Some(&model_key) && !models.contains_key(&model_key),
                 "duplicate model key '{model_key}' derived from path '{model_path}'"
             );
 
             let ctx = ctx::get_context(model_path)?;
             if first_model_key.is_none() {
-                first_model_key = Some(model_key.clone());
+                first_model_key = Some(model_key);
+                first_model = Some(ctx);
+            } else {
+                models.insert(model_key, ctx);
             }
-            models.insert(model_key, ctx);
         }
 
         let first_model_key = first_model_key
             .ok_or_else(|| anyhow!("at least one whisper model must be provided"))?;
+        let first_model =
+            first_model.ok_or_else(|| anyhow!("missing default whisper model context"))?;
 
         Ok(Self {
             first_model_key,
+            first_model,
             models,
             vad_model_path: vad_model_path.to_owned(),
         })
@@ -98,9 +105,7 @@ impl WhisperBackend {
 
     /// Access the default Whisper context (the first loaded model).
     pub fn context(&self) -> &WhisperContext {
-        self.models
-            .get(&self.first_model_key)
-            .expect("WhisperBackend first model key should exist in map")
+        &self.first_model
     }
 
     /// Access the configured VAD model path.
@@ -115,7 +120,9 @@ impl WhisperBackend {
 
     /// List available model keys (sorted).
     pub fn model_keys(&self) -> Vec<String> {
-        let mut keys: Vec<String> = self.models.keys().cloned().collect();
+        let mut keys = Vec::with_capacity(self.models.len() + 1);
+        keys.push(self.first_model_key.clone());
+        keys.extend(self.models.keys().cloned());
         keys.sort_unstable();
         keys
     }
@@ -141,7 +148,7 @@ impl WhisperBackend {
 
     fn selected_model_key<'a>(&'a self, opts: &'a Opts) -> Result<&'a str> {
         if let Some(key) = opts.model_key.as_deref() {
-            if self.models.contains_key(key) {
+            if key == self.first_model_key || self.models.contains_key(key) {
                 return Ok(key);
             }
             return Err(anyhow!(
@@ -155,6 +162,9 @@ impl WhisperBackend {
 
     fn selected_context<'a>(&'a self, opts: &'a Opts) -> Result<&'a WhisperContext> {
         let key = self.selected_model_key(opts)?;
+        if key == self.first_model_key {
+            return Ok(&self.first_model);
+        }
         self.models
             .get(key)
             .ok_or_else(|| anyhow!("selected model '{key}' was not loaded"))
@@ -162,6 +172,7 @@ impl WhisperBackend {
 
     fn available_model_keys(&self) -> String {
         let mut keys: Vec<&str> = self.models.keys().map(|k| k.as_str()).collect();
+        keys.push(self.first_model_key.as_str());
         keys.sort_unstable();
         keys.join(", ")
     }

@@ -154,11 +154,11 @@ impl AudioPipeline {
         self.mono_src_acc.extend_from_slice(mono_src);
 
         loop {
-            let in_max = self
+            let rs = self
                 .resampler
                 .as_ref()
-                .expect("resampler must be initialized before flushing")
-                .input_frames_max();
+                .ok_or_else(|| anyhow!("resampler not initialized"))?;
+            let in_max = rs.input_frames_max();
 
             if self.mono_src_acc.len() < in_max {
                 break;

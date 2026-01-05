@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::extract::MatchedPath;
 use axum::http::Request;
@@ -21,59 +22,81 @@ struct Metrics {
 
 static METRICS: OnceLock<Metrics> = OnceLock::new();
 
-fn metrics() -> &'static Metrics {
-    METRICS.get_or_init(|| {
-        let registry = Registry::new();
+fn build_metrics() -> Result<Metrics> {
+    let registry = Registry::new();
 
-        let http_requests_total = IntCounterVec::new(
-            PromOpts::new(
-                "scribble_http_requests_total",
-                "Total HTTP requests served by scribble-server.",
-            ),
-            &["status"],
-        )
-        .expect("metrics definition must be valid");
+    let http_requests_total = IntCounterVec::new(
+        PromOpts::new(
+            "scribble_http_requests_total",
+            "Total HTTP requests served by scribble-server.",
+        ),
+        &["status"],
+    )
+    .context("invalid definition for scribble_http_requests_total")?;
 
-        let http_request_duration_seconds = HistogramVec::new(
-            HistogramOpts::new(
-                "scribble_http_request_duration_seconds",
-                "HTTP request latency in seconds.",
-            ),
-            &["status"],
-        )
-        .expect("metrics definition must be valid");
+    let http_request_duration_seconds = HistogramVec::new(
+        HistogramOpts::new(
+            "scribble_http_request_duration_seconds",
+            "HTTP request latency in seconds.",
+        ),
+        &["status"],
+    )
+    .context("invalid definition for scribble_http_request_duration_seconds")?;
 
-        let http_in_flight_requests = IntGauge::new(
-            "scribble_http_in_flight_requests",
-            "Current number of in-flight HTTP requests.",
-        )
-        .expect("metrics definition must be valid");
+    let http_in_flight_requests = IntGauge::new(
+        "scribble_http_in_flight_requests",
+        "Current number of in-flight HTTP requests.",
+    )
+    .context("invalid definition for scribble_http_in_flight_requests")?;
 
-        registry
-            .register(Box::new(http_requests_total.clone()))
-            .expect("metrics must register");
-        registry
-            .register(Box::new(http_request_duration_seconds.clone()))
-            .expect("metrics must register");
-        registry
-            .register(Box::new(http_in_flight_requests.clone()))
-            .expect("metrics must register");
+    registry
+        .register(Box::new(http_requests_total.clone()))
+        .context("failed to register scribble_http_requests_total")?;
+    registry
+        .register(Box::new(http_request_duration_seconds.clone()))
+        .context("failed to register scribble_http_request_duration_seconds")?;
+    registry
+        .register(Box::new(http_in_flight_requests.clone()))
+        .context("failed to register scribble_http_in_flight_requests")?;
 
-        Metrics {
-            registry,
-            http_requests_total,
-            http_request_duration_seconds,
-            http_in_flight_requests,
-        }
+    Ok(Metrics {
+        registry,
+        http_requests_total,
+        http_request_duration_seconds,
+        http_in_flight_requests,
     })
 }
 
-pub fn init() {
-    let _ = metrics();
+fn metrics() -> Option<&'static Metrics> {
+    METRICS.get()
+}
+
+pub fn init() -> Result<()> {
+    if metrics().is_some() {
+        return Ok(());
+    }
+
+    let built = build_metrics()?;
+    let _ = METRICS.set(built);
+    Ok(())
 }
 
 pub async fn prometheus_metrics() -> Response {
-    let families = metrics().registry.gather();
+    if metrics().is_none()
+        && let Err(err) = init()
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to initialize metrics: {err:#}"),
+        )
+            .into_response();
+    }
+
+    let Some(metrics) = metrics() else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "metrics not initialized").into_response();
+    };
+
+    let families = metrics.registry.gather();
     let mut buf = Vec::new();
     if TextEncoder::new().encode(&families, &mut buf).is_err() {
         return (
@@ -105,18 +128,22 @@ pub async fn track_http_metrics(req: Request<Body>, next: Next) -> Response {
         return next.run(req).await;
     }
 
+    let Some(metrics) = metrics() else {
+        return next.run(req).await;
+    };
+
     let start = Instant::now();
 
-    metrics().http_in_flight_requests.inc();
+    metrics.http_in_flight_requests.inc();
     let response = next.run(req).await;
-    metrics().http_in_flight_requests.dec();
+    metrics.http_in_flight_requests.dec();
 
     let status = response.status().as_u16().to_string();
-    metrics()
+    metrics
         .http_requests_total
         .with_label_values(&[&status])
         .inc();
-    metrics()
+    metrics
         .http_request_duration_seconds
         .with_label_values(&[&status])
         .observe(start.elapsed().as_secs_f64());
@@ -130,20 +157,22 @@ mod tests {
 
     #[test]
     fn init_is_idempotent_and_registers_metrics() {
-        init();
-        init();
+        init().unwrap();
+        init().unwrap();
 
         metrics()
+            .unwrap()
             .http_requests_total
             .with_label_values(&["200"])
             .inc();
         metrics()
+            .unwrap()
             .http_request_duration_seconds
             .with_label_values(&["200"])
             .observe(0.001);
-        metrics().http_in_flight_requests.inc();
+        metrics().unwrap().http_in_flight_requests.inc();
 
-        let families = metrics().registry.gather();
+        let families = metrics().unwrap().registry.gather();
         let names: Vec<&str> = families.iter().map(|f| f.name()).collect();
         assert!(names.contains(&"scribble_http_requests_total"));
         assert!(names.contains(&"scribble_http_request_duration_seconds"));
@@ -152,12 +181,14 @@ mod tests {
 
     #[tokio::test]
     async fn prometheus_metrics_returns_text_format() -> anyhow::Result<()> {
-        init();
+        init().unwrap();
         metrics()
+            .unwrap()
             .http_requests_total
             .with_label_values(&["200"])
             .inc();
         metrics()
+            .unwrap()
             .http_request_duration_seconds
             .with_label_values(&["200"])
             .observe(0.001);

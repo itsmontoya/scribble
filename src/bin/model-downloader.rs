@@ -264,7 +264,10 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let name = args.name.as_deref().expect("clap should require --name");
+    let name = args
+        .name
+        .as_deref()
+        .context("--name is required unless --list is set")?;
 
     fs::create_dir_all(&args.dir)
         .with_context(|| format!("failed to create target dir: {}", args.dir.display()))?;
@@ -365,7 +368,7 @@ fn download_to_path_with_reader<R: Read>(
         ProgressStyle::with_template(
             "{spinner:.green} {bytes}/{total_bytes} {bar:40.cyan/blue} {eta}",
         )
-        .unwrap()
+        .context("invalid progress bar template")?
         .progress_chars("#>-"),
     );
 
