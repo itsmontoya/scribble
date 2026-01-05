@@ -4,9 +4,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 /// Initialize structured JSON logging.
 ///
-/// Defaults to `error` level unless overridden by `RUST_LOG`.
+/// Defaults to `error` level unless overridden by `SCRIBBLE_LOG`.
 pub fn init() {
     let filter = EnvFilter::builder()
+        .with_env_var("SCRIBBLE_LOG")
         .with_default_directive(tracing::level_filters::LevelFilter::ERROR.into())
         .from_env_lossy();
 
