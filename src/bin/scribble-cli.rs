@@ -4,12 +4,22 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::fs::File;
 use std::io::{self, Read};
+use tracing::error;
 
 use scribble::opts::Opts;
 use scribble::output_type::OutputType;
 use scribble::scribble::Scribble;
 
-fn main() -> Result<()> {
+fn main() {
+    scribble::logging::init();
+
+    if let Err(err) = run() {
+        error!(error = ?err, "scribble-cli failed");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let params = Params::parse();
 
     // Map CLI flags into library options.
