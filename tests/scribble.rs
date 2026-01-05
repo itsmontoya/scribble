@@ -4,8 +4,8 @@ use scribble::{
     backends::whisper::WhisperBackend, opts::Opts, output_type::OutputType, scribble::Scribble,
 };
 
-const FIXTURE_WAV: &str = "tests/fixtures/treat_yo_self.wav";
-const WHISPER_MODEL: &str = "./models/ggml-large-v3-turbo.bin";
+const FIXTURE_WAV: &str = "tests/fixtures/jfk.wav";
+const WHISPER_MODEL: &str = "./models/ggml-tiny.bin";
 const VAD_MODEL: &str = "./models/ggml-silero-v6.2.0.bin";
 
 fn require_file(path: &str) -> anyhow::Result<()> {
@@ -98,7 +98,7 @@ fn transcribes_wav_to_json_variants() -> anyhow::Result<()> {
     for (name, opts) in cases {
         let json = run_to_json(&mut scribble, &opts)?;
         assert!(
-            json.contains("Treat. Yo. Self."),
+            json.contains(" We choose to go to the moon and this decay and do the other things, not because they are easy, but because they are hard."),
             "case `{name}` did not contain expected phrase. Output:\n{json}"
         );
     }
