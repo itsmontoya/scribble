@@ -159,6 +159,13 @@ Key metrics:
 - `scribble_http_request_duration_seconds` (labels: `status`)
 - `scribble_http_in_flight_requests`
 
+### Logging
+
+All binaries emit structured JSON logs to `stderr`.
+
+- Default level: `error`
+- Override with `SCRIBBLE_LOG` (e.g. `SCRIBBLE_LOG=info`)
+
 ### JSON output
 
 ```bash
@@ -247,7 +254,7 @@ println!("{json}");
 - [X] Select the primary audio track in multi-track video containers
 - [X] Implement a web server
 - [X] Add Prometheus metrics endpoint
-- [ ] Add structured logs (tracing)
+- [X] Add structured logs (tracing)
 - [ ] Expand test coverage to 80%+
 
 ## Status

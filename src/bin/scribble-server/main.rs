@@ -18,6 +18,8 @@ use symphonia::core::io::ReadOnlySource;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_util::io::{ReaderStream, SyncIoBridge};
+use tower_http::trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnResponse, TraceLayer};
+use tracing::{Level, error, info};
 
 mod metrics;
 
@@ -114,7 +116,16 @@ impl IntoResponse for AppError {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    scribble::logging::init();
+
+    if let Err(err) = run().await {
+        error!(error = ?err, "scribble-server failed");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let params = Params::parse();
 
     metrics::init();
@@ -138,9 +149,20 @@ async fn main() -> Result<()> {
         .route("/v1/transcribe", post(transcribe))
         .route_layer(from_fn(metrics::track_http_metrics))
         .with_state(state)
-        .layer(DefaultBodyLimit::max(params.max_bytes));
+        .layer(DefaultBodyLimit::max(params.max_bytes))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(
+                    DefaultMakeSpan::new()
+                        .level(Level::INFO)
+                        .include_headers(false),
+                )
+                .on_response(DefaultOnResponse::new().level(Level::INFO))
+                .on_failure(DefaultOnFailure::new().level(Level::ERROR)),
+        );
 
     let listener = TcpListener::bind(addr).await.context("bind failed")?;
+    info!(%addr, "listening");
     axum::serve(listener, app).await.context("server error")?;
 
     Ok(())
@@ -220,7 +242,7 @@ async fn transcribe(
 
     tokio::spawn(async move {
         if let Ok(Err(msg)) = done_rx.await {
-            eprintln!("scribble-server transcription failed: {msg}");
+            error!(%msg, "transcription failed");
         }
     });
 
