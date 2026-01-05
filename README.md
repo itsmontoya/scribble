@@ -6,7 +6,7 @@
 [crates.io]: https://crates.io/crates/scribble
 [Coverage]: https://img.shields.io/badge/coverage-80.36%25-green
 [License Badge]: https://img.shields.io/badge/license-MIT-blue.svg
-[License URL]: https://github.com/itsmontoya/scribble/blob/master/LICENSE
+[License URL]: https://github.com/itsmontoya/scribble/blob/main/LICENSE
 [Docs Badge]: https://img.shields.io/badge/docs.rs-scribble-CE422B
 [Docs URL]: https://docs.rs/scribble/latest/scribble/
 
