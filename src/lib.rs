@@ -86,5 +86,8 @@ pub mod vtt_encoder;
 // Infrastructure
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Structured JSON logging helpers.
+pub mod logging;
+
 /// Internal adapters used to keep the high-level transcription loop linear and explicit.
 pub(crate) mod samples_rx;
