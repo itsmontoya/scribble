@@ -145,6 +145,20 @@ curl -sS --data-binary @./input.mp4 \
   > transcript.json
 ```
 
+### Prometheus metrics
+
+`scribble-server` exposes Prometheus metrics at `GET /metrics`.
+
+```bash
+curl -sS "http://127.0.0.1:8080/metrics"
+```
+
+Key metrics:
+
+- `scribble_http_requests_total` (labels: `status`)
+- `scribble_http_request_duration_seconds` (labels: `status`)
+- `scribble_http_in_flight_requests`
+
 ### JSON output
 
 ```bash
