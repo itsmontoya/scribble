@@ -66,8 +66,6 @@ struct TranscribeQuery {
     translate_to_english: Option<bool>,
     #[serde(default)]
     language: Option<String>,
-    #[serde(default)]
-    incremental_min_window_seconds: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -186,7 +184,7 @@ async fn transcribe(
         enable_voice_activity_detection: query.enable_vad.unwrap_or(false),
         language: query.language,
         output_type,
-        incremental_min_window_seconds: query.incremental_min_window_seconds.unwrap_or(1),
+        incremental_min_window_seconds: 1,
     };
 
     let content_type = match opts.output_type {
