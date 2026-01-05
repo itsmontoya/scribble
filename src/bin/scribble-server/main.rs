@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
+use axum::middleware::from_fn;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -17,6 +18,8 @@ use symphonia::core::io::ReadOnlySource;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_util::io::{ReaderStream, SyncIoBridge};
+
+mod metrics;
 
 use scribble::opts::Opts;
 use scribble::output_type::OutputType;
@@ -114,6 +117,8 @@ impl IntoResponse for AppError {
 async fn main() -> Result<()> {
     let params = Params::parse();
 
+    metrics::init();
+
     let addr: SocketAddr = format!("{}:{}", params.host, params.port)
         .parse()
         .context("invalid host/port bind address")?;
@@ -128,8 +133,10 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(root))
         .route("/healthz", get(healthz))
+        .route("/metrics", get(metrics::prometheus_metrics))
         .route("/v1/models", get(models))
         .route("/v1/transcribe", post(transcribe))
+        .route_layer(from_fn(metrics::track_http_metrics))
         .with_state(state)
         .layer(DefaultBodyLimit::max(params.max_bytes));
 
