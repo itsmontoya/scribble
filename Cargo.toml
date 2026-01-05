@@ -1,11 +1,24 @@
 [package]
 name = "scribble"
+rust-version = "1.92"
 version = "0.4.2"
 edition = "2024"
+
+include = [
+  "src/**",
+  "tests/**",
+  "README.md",
+  "STYLEGUIDE.md",
+  "LICENSE",
+  "banner.png",
+  "footer.png",
+  "demo/**",
+]
 
 description = "High-level Rust API for audio transcription using Whisper"
 license = "MIT"
 repository = "https://github.com/itsmontoya/scribble"
+documentation = "https://docs.rs/scribble"
 readme = "README.md"
 authors = ["Josh Montoya <josh@montoya.io>"]
 keywords = ["whisper", "transcription", "speech-to-text"]
@@ -29,7 +42,7 @@ reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }
 rubato = "0.16"
 symphonia = { version = "0.5", features = ["all"] }
 tempfile = "3"
-prometheus = "0.13"
+prometheus = "0.14"
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

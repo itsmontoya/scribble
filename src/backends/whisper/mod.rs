@@ -30,13 +30,11 @@ pub struct WhisperStream<'a> {
     inner: BufferedSegmentTranscriber<'a>,
 }
 
-impl SamplesSink for WhisperStream<'_> {
+impl BackendStream for WhisperStream<'_> {
     fn on_samples(&mut self, samples_16k_mono: &[f32]) -> Result<bool> {
         self.inner.on_samples(samples_16k_mono)
     }
-}
 
-impl BackendStream for WhisperStream<'_> {
     fn finish(&mut self) -> Result<()> {
         self.inner.finish()
     }

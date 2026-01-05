@@ -23,9 +23,7 @@ use tracing::{Level, error, info};
 
 mod metrics;
 
-use scribble::opts::Opts;
-use scribble::output_type::OutputType;
-use scribble::scribble::Scribble;
+use scribble::{Opts, OutputType, Scribble, WhisperBackend};
 
 type BodyDataStream = BoxStream<'static, std::result::Result<Bytes, axum::Error>>;
 
@@ -56,7 +54,7 @@ struct Params {
 
 #[derive(Clone)]
 struct AppState {
-    scribble: Arc<Scribble<scribble::backends::whisper::WhisperBackend>>,
+    scribble: Arc<Scribble<WhisperBackend>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,7 +115,7 @@ impl IntoResponse for AppError {
 
 #[tokio::main]
 async fn main() {
-    scribble::logging::init();
+    scribble::init_logging();
 
     if let Err(err) = run().await {
         error!(error = ?err, "scribble-server failed");
@@ -294,12 +292,55 @@ async fn get_prefix_bytes(
 
 fn validate_media_prefix(prefix: &[u8]) -> std::result::Result<(), AppError> {
     let source = ReadOnlySource::new(Cursor::new(prefix.to_vec()));
-    if let Err(err) = scribble::demux::probe_source_and_pick_default_track(Box::new(source), None) {
+    if let Err(err) = probe_source_and_pick_default_track(Box::new(source), None) {
         return Err(AppError::unsupported_media(format!(
             "unsupported or unrecognized media container: {err}"
         )));
     }
     Ok(())
+}
+
+fn probe_source_and_pick_default_track(
+    source: Box<dyn symphonia::core::io::MediaSource>,
+    hint_extension: Option<&str>,
+) -> Result<(
+    Box<dyn symphonia::core::formats::FormatReader>,
+    symphonia::core::formats::Track,
+)> {
+    use symphonia::core::codecs::CODEC_TYPE_NULL;
+    use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let mss_opts = MediaSourceStreamOptions {
+        buffer_len: 256 * 1024,
+    };
+
+    let mss = MediaSourceStream::new(source, mss_opts);
+
+    let mut hint = Hint::new();
+    if let Some(ext) = hint_extension {
+        hint.with_extension(ext);
+    }
+
+    let format_opts: symphonia::core::formats::FormatOptions = Default::default();
+    let metadata_opts: MetadataOptions = Default::default();
+
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &format_opts, &metadata_opts)
+        .map_err(|e| anyhow!(e))
+        .context("failed to probe media stream")?;
+
+    let format = probed.format;
+
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL && t.codec_params.sample_rate.is_some())
+        .cloned()
+        .ok_or_else(|| anyhow!("no audio track found"))?;
+
+    Ok((format, track))
 }
 
 fn parse_output_type(output: Option<&str>) -> Result<OutputType> {

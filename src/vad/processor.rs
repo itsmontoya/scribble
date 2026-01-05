@@ -21,12 +21,7 @@ impl VadProcessor {
         })
     }
 
-    pub fn with_policy(mut self, policy: VadPolicy) -> Self {
-        self.policy = policy;
-        self
-    }
-
-    pub fn policy(&self) -> VadPolicy {
+    pub(crate) fn policy(&self) -> VadPolicy {
         self.policy
     }
 

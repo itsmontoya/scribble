@@ -16,7 +16,8 @@ use crate::audio_pipeline::TARGET_SAMPLE_RATE;
 ///
 /// Why we enforce this:
 /// - enforcing constraints here keeps downstream transcription simple and predictable
-pub fn get_samples_from_wav_reader<R>(reader: R) -> Result<(Vec<f32>, WavSpec)>
+#[cfg(test)]
+pub(crate) fn get_samples_from_wav_reader<R>(reader: R) -> Result<(Vec<f32>, WavSpec)>
 where
     R: Read + Seek,
 {

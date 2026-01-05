@@ -226,7 +226,7 @@ Scribble is also designed to be embedded as a library.
 High-level usage looks like:
 
 ```rust
-use scribble::{opts::Opts, output_type::OutputType, scribble::Scribble};
+use scribble::{Opts, OutputType, Scribble};
 use std::fs::File;
 
 let mut scribble = Scribble::new(
