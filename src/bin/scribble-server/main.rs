@@ -314,3 +314,91 @@ fn parse_output_type(output: Option<&str>) -> Result<OutputType> {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::{StreamExt, TryStreamExt};
+
+    fn stream_from_chunks(chunks: Vec<&'static [u8]>) -> BodyDataStream {
+        futures_util::stream::iter(
+            chunks
+                .into_iter()
+                .map(|c| Ok::<Bytes, axum::Error>(Bytes::from_static(c))),
+        )
+        .boxed()
+    }
+
+    #[test]
+    fn parse_output_type_defaults_to_vtt() -> anyhow::Result<()> {
+        assert!(matches!(parse_output_type(None)?, OutputType::Vtt));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_output_type_accepts_known_values_case_insensitively() -> anyhow::Result<()> {
+        assert!(matches!(
+            parse_output_type(Some(" json "))?,
+            OutputType::Json
+        ));
+        assert!(matches!(parse_output_type(Some("VTT"))?, OutputType::Vtt));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_output_type_rejects_unknown_value() {
+        let err = parse_output_type(Some("nope")).unwrap_err();
+        assert!(err.to_string().contains("unknown output type"));
+    }
+
+    #[tokio::test]
+    async fn get_prefix_bytes_errors_on_empty_body() {
+        let res = get_prefix_bytes(stream_from_chunks(vec![]), 16).await;
+        assert!(res.is_err());
+        let err = res.err().expect("expected AppError");
+        assert!(err.message.contains("request body was empty"));
+    }
+
+    #[tokio::test]
+    async fn get_prefix_bytes_skips_empty_chunks() {
+        let (prefix_bytes, prefix_chunks, _tail) =
+            match get_prefix_bytes(stream_from_chunks(vec![b"", b"abc"]), 16).await {
+                Ok(v) => v,
+                Err(err) => panic!("unexpected error: {}", err.message),
+            };
+        assert_eq!(prefix_bytes, b"abc");
+        assert_eq!(prefix_chunks.len(), 1);
+        assert_eq!(prefix_chunks[0].as_ref(), b"abc");
+    }
+
+    #[tokio::test]
+    async fn get_prefix_bytes_splits_large_chunk_and_replays_tail() {
+        let (prefix_bytes, prefix_chunks, tail) =
+            match get_prefix_bytes(stream_from_chunks(vec![b"helloWORLD"]), 5).await {
+                Ok(v) => v,
+                Err(err) => panic!("unexpected error: {}", err.message),
+            };
+
+        assert_eq!(prefix_bytes, b"hello");
+        assert_eq!(prefix_chunks.len(), 1);
+        assert_eq!(prefix_chunks[0].as_ref(), b"hello");
+
+        let tail_chunks: Vec<Bytes> = match tail.try_collect().await {
+            Ok(v) => v,
+            Err(err) => panic!("unexpected tail stream error: {err}"),
+        };
+        assert_eq!(tail_chunks.len(), 1);
+        assert_eq!(tail_chunks[0].as_ref(), b"WORLD");
+    }
+
+    #[test]
+    fn validate_media_prefix_accepts_wav_fixture() {
+        let bytes = std::fs::read("tests/fixtures/jfk.wav").expect("read wav fixture");
+        if let Err(err) = validate_media_prefix(&bytes) {
+            panic!(
+                "expected WAV fixture to probe successfully: {}",
+                err.message
+            );
+        }
+    }
+}

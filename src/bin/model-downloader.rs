@@ -309,29 +309,51 @@ fn lookup_model(name: &str) -> Option<&'static ModelSpec> {
 }
 
 fn print_model_list() {
-    println!("Whisper models:");
+    print!("{}", model_list_string());
+}
+
+fn model_list_string() -> String {
+    let mut out = String::new();
+
+    out.push_str("Whisper models:\n");
     for m in WHISPER_MODELS {
-        println!("  - {}", m.name);
+        out.push_str("  - ");
+        out.push_str(m.name);
+        out.push('\n');
     }
-    println!();
-    println!("VAD models:");
+
+    out.push('\n');
+    out.push_str("VAD models:\n");
     for m in VAD_MODELS {
-        println!("  - {}", m.name);
+        out.push_str("  - ");
+        out.push_str(m.name);
+        out.push('\n');
     }
+
+    out
 }
 
 /// Download a URL into `dest_path` safely:
 /// - download to `dest_path.part`
 /// - fsync + rename to final path
 fn download_to_path(client: &Client, url: &str, dest_path: &Path) -> Result<()> {
-    let mut resp = client
+    let resp = client
         .get(url)
         .send()
         .with_context(|| format!("request failed: {url}"))?
         .error_for_status()
         .with_context(|| format!("download failed (bad status): {url}"))?;
 
-    let total = resp.content_length().unwrap_or(0);
+    let total = resp.content_length();
+    download_to_path_with_reader(resp, total, dest_path)
+}
+
+fn download_to_path_with_reader<R: Read>(
+    mut reader: R,
+    total_bytes: Option<u64>,
+    dest_path: &Path,
+) -> Result<()> {
+    let total = total_bytes.unwrap_or(0);
 
     let pb = if total > 0 {
         ProgressBar::new(total)
@@ -355,7 +377,7 @@ fn download_to_path(client: &Client, url: &str, dest_path: &Path) -> Result<()> 
 
         let mut buf = [0u8; 64 * 1024];
         loop {
-            let n = resp.read(&mut buf)?;
+            let n = reader.read(&mut buf)?;
             if n == 0 {
                 break;
             }
@@ -378,4 +400,100 @@ fn download_to_path(client: &Client, url: &str, dest_path: &Path) -> Result<()> 
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_model_finds_whisper_and_vad_specs() {
+        let whisper = lookup_model("tiny").expect("expected tiny model spec");
+        assert_eq!(whisper.kind, ModelKind::Whisper);
+        assert_eq!(whisper.filename, "ggml-tiny.bin");
+
+        let vad = lookup_model("silero-v6.2.0").expect("expected silero model spec");
+        assert_eq!(vad.kind, ModelKind::Vad);
+        assert_eq!(vad.filename, "ggml-silero-v6.2.0.bin");
+
+        assert!(lookup_model("definitely-not-a-model").is_none());
+    }
+
+    #[test]
+    fn model_list_string_includes_sections_and_known_names() {
+        let list = model_list_string();
+        assert!(list.contains("Whisper models:\n"));
+        assert!(list.contains("  - tiny\n"));
+        assert!(list.contains("VAD models:\n"));
+        assert!(list.contains("  - silero-v6.2.0\n"));
+    }
+
+    #[test]
+    fn args_parse_requires_name_unless_list() {
+        let err =
+            Args::try_parse_from(["model-downloader"]).expect_err("expected missing-args error");
+        assert!(err.to_string().contains("--name"));
+
+        let args = Args::try_parse_from(["model-downloader", "--list"]).expect("parse list params");
+        assert!(args.list);
+        assert!(args.name.is_none());
+    }
+
+    #[test]
+    fn download_to_path_with_reader_writes_and_renames() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dest_path = dir.path().join("model.bin");
+        let tmp_path = PathBuf::from(format!("{}.part", dest_path.display()));
+
+        let bytes = b"abc123".to_vec();
+        download_to_path_with_reader(
+            std::io::Cursor::new(bytes.clone()),
+            Some(bytes.len() as u64),
+            &dest_path,
+        )?;
+
+        assert!(dest_path.exists());
+        assert!(!tmp_path.exists());
+        assert_eq!(std::fs::read(&dest_path)?, bytes);
+        Ok(())
+    }
+
+    struct ErrorAfterNBytes {
+        bytes: Vec<u8>,
+        fail_at: usize,
+        pos: usize,
+    }
+
+    impl Read for ErrorAfterNBytes {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.pos >= self.fail_at {
+                return Err(std::io::Error::other("simulated read failure"));
+            }
+
+            let remaining = &self.bytes[self.pos..];
+            let n = remaining.len().min(buf.len());
+            buf[..n].copy_from_slice(&remaining[..n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn download_to_path_with_reader_cleans_up_part_file_on_error() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dest_path = dir.path().join("model.bin");
+        let tmp_path = PathBuf::from(format!("{}.part", dest_path.display()));
+
+        let reader = ErrorAfterNBytes {
+            bytes: b"abc123".to_vec(),
+            fail_at: 1,
+            pos: 0,
+        };
+
+        let err = download_to_path_with_reader(reader, Some(6), &dest_path).unwrap_err();
+        assert!(err.to_string().contains("simulated read failure"));
+        assert!(!dest_path.exists());
+        assert!(!tmp_path.exists());
+        Ok(())
+    }
 }

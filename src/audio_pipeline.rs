@@ -285,6 +285,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn finalize_is_noop_without_resampler() -> anyhow::Result<()> {
+        let mut pipeline = AudioPipeline::new();
+        pipeline.finalize(256, |_| Ok(true))?;
+        Ok(())
+    }
+
+    #[test]
     fn downmix_to_mono_single_channel_is_identity() {
         let input = vec![0.0, 1.0, -1.0];
         let mono = downmix_to_mono(&input, 1);
@@ -309,6 +316,46 @@ mod tests {
         })?;
 
         assert_eq!(seen, vec![4]);
+        Ok(())
+    }
+
+    #[test]
+    fn resample_block_errors_when_resampler_is_missing() {
+        let mut pipeline = AudioPipeline::new();
+        let err = pipeline.resample_block_into_out(&[0.0; 16]).unwrap_err();
+        assert!(err.to_string().contains("resampler not initialized"));
+    }
+
+    #[test]
+    fn resample_path_emits_and_finalize_flushes_remainder() -> anyhow::Result<()> {
+        let mut pipeline = AudioPipeline::new();
+        pipeline.ensure_resampler(8_000)?;
+        pipeline.ensure_resampler(8_000)?; // idempotent
+
+        let in_max = pipeline
+            .resampler
+            .as_ref()
+            .expect("resampler initialized")
+            .input_frames_max();
+
+        // Enough samples to force multiple full blocks plus a remainder that `finalize()` flushes.
+        let mono_src = vec![0.0; (in_max * 2) + 7];
+
+        let mut emitted_samples = 0usize;
+        pipeline.push_and_flush_resampler(&mono_src, 256, &mut |chunk| {
+            emitted_samples += chunk.len();
+            Ok(true)
+        })?;
+
+        // We expect the remainder to be smaller than one full rubato input block.
+        assert!(pipeline.mono_src_acc.len() < in_max);
+
+        pipeline.finalize(256, |chunk| {
+            emitted_samples += chunk.len();
+            Ok(true)
+        })?;
+
+        assert!(emitted_samples > 0);
         Ok(())
     }
 }

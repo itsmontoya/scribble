@@ -326,4 +326,174 @@ mod tests {
         let err = err.expect("expected get_vad() to error");
         assert!(err.to_string().contains("no VAD model path"));
     }
+
+    struct NoopEncoder;
+
+    impl SegmentEncoder for NoopEncoder {
+        fn write_segment(&mut self, _seg: &crate::segments::Segment) -> Result<()> {
+            Ok(())
+        }
+
+        fn close(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FinishErrBackend;
+
+    struct FinishErrStream;
+
+    impl SamplesSink for FinishErrStream {
+        fn on_samples(&mut self, _samples_16k_mono: &[f32]) -> Result<bool> {
+            Ok(true)
+        }
+    }
+
+    impl BackendStream for FinishErrStream {
+        fn finish(&mut self) -> Result<()> {
+            Err(anyhow::anyhow!("finish failed"))
+        }
+    }
+
+    impl Backend for FinishErrBackend {
+        type Stream<'a>
+            = FinishErrStream
+        where
+            Self: 'a;
+
+        fn transcribe_full(
+            &self,
+            _opts: &Opts,
+            _encoder: &mut dyn SegmentEncoder,
+            _samples: &[f32],
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn create_stream<'a>(
+            &'a self,
+            _opts: &'a Opts,
+            _encoder: &'a mut dyn SegmentEncoder,
+        ) -> Result<Self::Stream<'a>> {
+            Ok(FinishErrStream)
+        }
+    }
+
+    #[test]
+    fn get_samples_rx_errors_when_vad_enabled_but_missing_processor() {
+        let mut opts = default_opts(OutputType::Json);
+        opts.enable_voice_activity_detection = true;
+
+        let input = std::io::Cursor::new(Vec::<u8>::new());
+        let err = Scribble::<DummyBackend>::get_samples_rx(input, &opts, None)
+            .err()
+            .expect("expected get_samples_rx() to error");
+        assert!(err.to_string().contains("VAD failed to initialize"));
+    }
+
+    #[test]
+    fn transcribe_with_encoder_surfaces_decoder_error_when_finish_ok() {
+        let scribble = Scribble::with_backend(DummyBackend);
+        let opts = default_opts(OutputType::Json);
+        let input = std::io::Cursor::new(Vec::<u8>::new());
+        let mut encoder = NoopEncoder;
+
+        let err = scribble
+            .transcribe_with_encoder(input, &opts, &mut encoder)
+            .unwrap_err();
+        assert!(err.to_string().contains("failed to probe media stream"));
+    }
+
+    #[test]
+    fn transcribe_with_encoder_surfaces_finish_error_when_decode_ok() -> anyhow::Result<()> {
+        let scribble = Scribble::with_backend(FinishErrBackend);
+        let opts = default_opts(OutputType::Json);
+        let input = std::fs::File::open("tests/fixtures/jfk.wav")?;
+        let mut encoder = NoopEncoder;
+
+        let err = scribble
+            .transcribe_with_encoder(input, &opts, &mut encoder)
+            .unwrap_err();
+        assert!(err.to_string().contains("finish failed"));
+        Ok(())
+    }
+
+    #[test]
+    fn transcribe_with_encoder_prefers_finish_error_when_both_fail() {
+        let scribble = Scribble::with_backend(FinishErrBackend);
+        let opts = default_opts(OutputType::Json);
+        let input = std::io::Cursor::new(Vec::<u8>::new());
+        let mut encoder = NoopEncoder;
+
+        let err = scribble
+            .transcribe_with_encoder(input, &opts, &mut encoder)
+            .unwrap_err();
+        let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
+        assert!(chain.iter().any(|s| s.contains("finish failed")));
+        assert!(
+            chain
+                .iter()
+                .any(|s| s.contains("failed to probe media stream"))
+        );
+    }
+
+    struct PanicRead;
+
+    impl Read for PanicRead {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            panic!("boom");
+        }
+    }
+
+    #[test]
+    fn transcribe_with_encoder_reports_decoder_thread_panic() {
+        let scribble = Scribble::with_backend(DummyBackend);
+        let opts = default_opts(OutputType::Json);
+        let mut encoder = NoopEncoder;
+
+        let err = scribble
+            .transcribe_with_encoder(PanicRead, &opts, &mut encoder)
+            .unwrap_err();
+        assert!(err.to_string().contains("decoder thread panicked"));
+    }
+
+    struct FailingWriter;
+
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("write failed"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::other("flush failed"))
+        }
+    }
+
+    #[test]
+    fn transcribe_surfaces_json_close_error_when_run_ok() -> anyhow::Result<()> {
+        let scribble = Scribble::with_backend(DummyBackend);
+        let opts = default_opts(OutputType::Json);
+        let input = std::fs::File::open("tests/fixtures/jfk.wav")?;
+
+        let err = scribble
+            .transcribe(input, FailingWriter, &opts)
+            .unwrap_err();
+        assert!(err.to_string().contains("write failed"));
+        Ok(())
+    }
+
+    #[test]
+    fn transcribe_surfaces_vtt_close_error_when_run_ok() -> anyhow::Result<()> {
+        let scribble = Scribble::with_backend(DummyBackend);
+        let opts = default_opts(OutputType::Vtt);
+        let input = std::fs::File::open("tests/fixtures/jfk.wav")?;
+
+        let err = scribble
+            .transcribe(input, FailingWriter, &opts)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("flush failed") || err.to_string().contains("write failed")
+        );
+        Ok(())
+    }
 }

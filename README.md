@@ -1,9 +1,10 @@
-# Scribble &emsp; [![Build Status]][actions] [![Latest Version]][crates.io]
+# Scribble &emsp; [![Build Status]][actions] [![Latest Version]][crates.io] [![Coverage]][actions]
 
 [Build Status]: https://img.shields.io/github/actions/workflow/status/itsmontoya/scribble/ci.yaml?branch=main
 [actions]: https://github.com/itsmontoya/scribble/actions?query=branch%3Amain
 [Latest Version]: https://img.shields.io/crates/v/scribble.svg
 [crates.io]: https://crates.io/crates/scribble
+[Coverage]: https://img.shields.io/badge/coverage-80.36%25-green
 
 Scribble is a fast, lightweight transcription engine written in Rust, with a built-in Whisper backend and a backend trait for custom implementations.
 
@@ -255,7 +256,7 @@ println!("{json}");
 - [X] Implement a web server
 - [X] Add Prometheus metrics endpoint
 - [X] Add structured logs (tracing)
-- [ ] Expand test coverage to 80%+
+- [X] Expand test coverage to 80%+
 
 ## Coverage
 
