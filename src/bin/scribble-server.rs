@@ -3,18 +3,26 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use axum::extract::{DefaultBodyLimit, Multipart, Query, State};
+use axum::body::{Body, Bytes};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
+use futures_util::stream::BoxStream;
+use futures_util::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
+use symphonia::core::io::ReadOnlySource;
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
+use tokio_util::io::{ReaderStream, SyncIoBridge};
 
 use scribble::opts::Opts;
 use scribble::output_type::OutputType;
 use scribble::scribble::Scribble;
+
+type BodyDataStream = BoxStream<'static, std::result::Result<Bytes, axum::Error>>;
 
 #[derive(Parser, Debug)]
 #[command(name = "scribble-server")]
@@ -87,9 +95,9 @@ impl AppError {
         }
     }
 
-    fn internal(message: impl Into<String>) -> Self {
+    fn unsupported_media(message: impl Into<String>) -> Self {
         Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
+            status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
             message: message.into(),
         }
     }
@@ -156,11 +164,18 @@ async fn models(
 async fn transcribe(
     State(state): State<AppState>,
     Query(query): Query<TranscribeQuery>,
-    mut multipart: Multipart,
+    body: Body,
 ) -> std::result::Result<Response, AppError> {
-    let file_bytes = read_file_field(&mut multipart)
-        .await
-        .map_err(|err| AppError::bad_request(err.to_string()))?;
+    // We want request bodies to be streaming (for very long/live uploads), but we still want to
+    // fail fast for obviously unsupported inputs. We do a small, bounded probe against the
+    // initial prefix and then replay that prefix into the decoder so transcription starts at
+    // byte 0 without buffering the whole upload.
+    const MAX_PROBE_BYTES: usize = 512 * 1024;
+    let body_stream: BodyDataStream = body.into_data_stream().boxed();
+    let (prefix_bytes, prefix_chunks, body_stream) =
+        get_prefix_bytes(body_stream, MAX_PROBE_BYTES).await?;
+
+    validate_media_prefix(&prefix_bytes)?;
 
     let output_type = parse_output_type(query.output.as_deref())
         .map_err(|err| AppError::bad_request(err.to_string()))?;
@@ -174,35 +189,90 @@ async fn transcribe(
         incremental_min_window_seconds: query.incremental_min_window_seconds.unwrap_or(1),
     };
 
-    let mut output = Vec::new();
-    state
-        .scribble
-        .transcribe(Cursor::new(file_bytes), &mut output, &opts)
-        .map_err(|err| AppError::internal(err.to_string()))?;
-
     let content_type = match opts.output_type {
         OutputType::Json => HeaderValue::from_static("application/json; charset=utf-8"),
         OutputType::Vtt => HeaderValue::from_static("text/vtt; charset=utf-8"),
     };
 
-    Ok(([(header::CONTENT_TYPE, content_type)], output).into_response())
+    let scribble = state.scribble.clone();
+    let prefix_stream =
+        futures_util::stream::iter(prefix_chunks.into_iter().map(Ok::<Bytes, axum::Error>));
+    let input_stream = prefix_stream.chain(body_stream);
+    let input_reader =
+        tokio_util::io::StreamReader::new(input_stream.map_err(std::io::Error::other));
+
+    let (out_tx, out_rx) = tokio::io::duplex(64 * 1024);
+    let (done_tx, done_rx) = oneshot::channel::<std::result::Result<(), String>>();
+
+    tokio::task::spawn_blocking(move || {
+        let mut writer = SyncIoBridge::new(out_tx);
+        let input = SyncIoBridge::new(input_reader);
+        let res = scribble
+            .transcribe(input, &mut writer, &opts)
+            .map_err(|err| err.to_string());
+        let _ = done_tx.send(res);
+    });
+
+    tokio::spawn(async move {
+        if let Ok(Err(msg)) = done_rx.await {
+            eprintln!("scribble-server transcription failed: {msg}");
+        }
+    });
+
+    let body = Body::from_stream(ReaderStream::new(out_rx));
+    Ok(([(header::CONTENT_TYPE, content_type)], body).into_response())
 }
 
-async fn read_file_field(multipart: &mut Multipart) -> Result<Vec<u8>> {
-    while let Some(field) = multipart.next_field().await? {
-        let name = field.name().unwrap_or_default().to_owned();
-        if name == "file" || name == "media" {
-            let bytes = field.bytes().await?;
-            if bytes.is_empty() {
-                return Err(anyhow!("multipart field '{name}' was empty"));
-            }
-            return Ok(bytes.to_vec());
+async fn get_prefix_bytes(
+    mut body_stream: BodyDataStream,
+    max_probe_bytes: usize,
+) -> std::result::Result<(Vec<u8>, Vec<Bytes>, BodyDataStream), AppError> {
+    let mut prefix_bytes = Vec::<u8>::new();
+    let mut prefix_chunks = Vec::<Bytes>::new();
+
+    while prefix_bytes.len() < max_probe_bytes {
+        let Some(chunk) = body_stream.next().await else {
+            break;
+        };
+        let chunk = chunk.map_err(|err| AppError::bad_request(err.to_string()))?;
+        if chunk.is_empty() {
+            continue;
         }
+
+        let remaining = max_probe_bytes - prefix_bytes.len();
+        if chunk.len() <= remaining {
+            prefix_bytes.extend_from_slice(&chunk);
+            prefix_chunks.push(chunk);
+            continue;
+        }
+
+        // Split the chunk so we only buffer up to the probe limit.
+        prefix_bytes.extend_from_slice(&chunk[..remaining]);
+        prefix_chunks.push(chunk.slice(..remaining));
+
+        // Put the tail back into the stream for transcription.
+        let tail = chunk.slice(remaining..);
+        let tail_stream: BodyDataStream =
+            futures_util::stream::once(async move { Ok::<Bytes, axum::Error>(tail) }).boxed();
+        body_stream = tail_stream.chain(body_stream).boxed();
+        break;
     }
 
-    Err(anyhow!(
-        "missing multipart field 'file' (or 'media') with the input container bytes"
-    ))
+    if prefix_bytes.is_empty() {
+        return Err(AppError::bad_request("request body was empty"));
+    }
+
+    Ok((prefix_bytes, prefix_chunks, body_stream))
+}
+
+fn validate_media_prefix(prefix: &[u8]) -> std::result::Result<(), AppError> {
+    let source = ReadOnlySource::new(Cursor::new(prefix.to_vec()));
+    if let Err(err) = scribble::demux::probe_source_and_pick_default_track(Box::new(source), None) {
+        return Err(AppError::unsupported_media(format!(
+            "unsupported or unrecognized media container: {err}"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_output_type(output: Option<&str>) -> Result<OutputType> {
