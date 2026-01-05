@@ -8,7 +8,11 @@ include = [
   "src/**",
   "tests/**",
   "README.md",
+  "CHANGELOG.md",
   "STYLEGUIDE.md",
+  "SECURITY.md",
+  "CONTRIBUTING.md",
+  "CODE_OF_CONDUCT.md",
   "LICENSE",
   "banner.png",
   "footer.png",
@@ -46,3 +50,4 @@ prometheus = "0.14"
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "2"

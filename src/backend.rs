@@ -1,5 +1,4 @@
-use anyhow::Result;
-
+use crate::Result;
 use crate::opts::Opts;
 use crate::segment_encoder::SegmentEncoder;
 

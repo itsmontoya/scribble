@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_util::io::{ReaderStream, SyncIoBridge};
 use tower_http::trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnResponse, TraceLayer};
-use tracing::{Level, error, info};
+use tracing::{Level, error, info, warn};
 
 mod metrics;
 
@@ -126,7 +126,9 @@ async fn main() {
 async fn run() -> Result<()> {
     let params = Params::parse();
 
-    metrics::init();
+    if let Err(err) = metrics::init() {
+        warn!(error = ?err, "metrics disabled (init failed)");
+    }
 
     let addr: SocketAddr = format!("{}:{}", params.host, params.port)
         .parse()

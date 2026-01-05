@@ -25,6 +25,7 @@
 
 mod backend;
 mod backends;
+mod error;
 mod opts;
 mod scribble;
 mod vad;
@@ -67,6 +68,7 @@ pub(crate) mod samples_rx;
 
 pub use crate::backend::{Backend, BackendStream};
 pub use crate::backends::whisper::WhisperBackend;
+pub use crate::error::{Error, Result};
 pub use crate::logging::init as init_logging;
 pub use crate::opts::Opts;
 pub use crate::output_type::OutputType;

@@ -1569,6 +1569,7 @@ dependencies = [
  "serde_json",
  "symphonia",
  "tempfile",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-util",
  "tower-http",

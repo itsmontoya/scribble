@@ -6,7 +6,7 @@
 [crates.io]: https://crates.io/crates/scribble
 [Coverage]: https://img.shields.io/badge/coverage-80.36%25-green
 [License Badge]: https://img.shields.io/badge/license-MIT-blue.svg
-[License URL]: https://github.com/itsmontoya/scribble/blob/master/LICENSE
+[License URL]: https://github.com/itsmontoya/scribble/blob/main/LICENSE
 [Docs Badge]: https://img.shields.io/badge/docs.rs-scribble-CE422B
 [Docs URL]: https://docs.rs/scribble/latest/scribble/
 
@@ -31,6 +31,10 @@ Scribble will demux/decode **audio *or* video containers** (MP4, MP3, WAV, FLAC,
 > Scribble is built with **streaming and real-time transcription** in mind, even when operating on static files today.
 
 ## Installation
+
+### Minimum supported Rust
+
+Scribble targets Rust **1.92.0** (pinned in `rust-toolchain.toml`, declared as `rust-version = "1.92"` in `Cargo.toml`).
 
 Clone the repository and build the binaries:
 
@@ -286,6 +290,8 @@ cargo llvm-cov --all-features --all-targets --html
 ## Status
 
 Scribble is under active development. The API is not yet stable, but the foundations are in place and evolving quickly.
+
+Release notes live in `CHANGELOG.md` (and GitHub Releases).
 
 ## Contributing
 
