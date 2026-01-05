@@ -144,7 +144,7 @@ mod tests {
         metrics().http_in_flight_requests.inc();
 
         let families = metrics().registry.gather();
-        let names: Vec<&str> = families.iter().map(|f| f.get_name()).collect();
+        let names: Vec<&str> = families.iter().map(|f| f.name()).collect();
         assert!(names.contains(&"scribble_http_requests_total"));
         assert!(names.contains(&"scribble_http_request_duration_seconds"));
         assert!(names.contains(&"scribble_http_in_flight_requests"));

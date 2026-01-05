@@ -81,7 +81,7 @@ fn segment_seconds_from_tokens_or_fallback(
     }
 }
 
-fn build_full_params<'a>(opts: &'a Opts) -> FullParams<'a, 'a> {
+fn build_full_params(opts: &Opts) -> FullParams<'_, '_> {
     let mut params = FullParams::new(SamplingStrategy::BeamSearch {
         beam_size: 5,
         patience: 1.0,
