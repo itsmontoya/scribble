@@ -17,77 +17,59 @@
 //! - Clear separation of concerns
 //! - Minimal surprises for callers
 //!
-//! Most consumers should start with [`scribble::Scribble`].
+//! Most consumers should start with [`crate::Scribble`].
 
 // ─────────────────────────────────────────────────────────────────────────────
 // High-level API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// User-facing transcription entry point and orchestration logic.
-pub mod scribble;
-
-/// Pluggable ASR backend trait.
-pub mod backend;
-
-/// Built-in backend implementations.
-pub mod backends;
-
-/// User-configurable transcription options.
-pub mod opts;
-
-/// Voice activity detection (VAD) helpers.
-pub mod vad;
+mod backend;
+mod backends;
+mod opts;
+mod scribble;
+mod vad;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Transcription core
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Segment data structures and transcription helpers.
-pub mod segments;
-/// Token data structures.
-pub mod token;
+mod segments;
+mod token;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Audio preprocessing pipeline
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Streaming-friendly audio decoding and normalization helpers.
-pub mod decoder;
-
-/// Low-level demux helpers (container probing, packet iteration).
-pub mod demux;
-
-/// Codec-level decode helpers.
-pub mod decode;
-
-/// Audio resampling, downmixing, and chunk emission pipeline.
-pub mod audio_pipeline;
-
-/// WAV helpers (primarily for tests and simple inputs).
-pub mod wav;
+mod audio_pipeline;
+mod decode;
+mod decoder;
+mod demux;
+#[cfg(test)]
+mod wav;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Output encoding
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Output format selection.
-pub mod output_type;
-
-/// Shared encoder trait definitions.
-pub mod segment_encoder;
-
-/// JSON array encoder.
-pub mod json_array_encoder;
-
-/// WebVTT encoder.
-pub mod vtt_encoder;
+mod json_array_encoder;
+mod output_type;
+mod segment_encoder;
+mod vtt_encoder;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Infrastructure
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Structured JSON logging helpers.
-pub mod logging;
+mod logging;
 
 /// Internal adapters used to keep the high-level transcription loop linear and explicit.
 pub(crate) mod samples_rx;
+
+pub use crate::backend::{Backend, BackendStream};
+pub use crate::backends::whisper::WhisperBackend;
+pub use crate::logging::init as init_logging;
+pub use crate::opts::Opts;
+pub use crate::output_type::OutputType;
+pub use crate::scribble::Scribble;
+pub use crate::segment_encoder::SegmentEncoder;
+pub use crate::segments::Segment;

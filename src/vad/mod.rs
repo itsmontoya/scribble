@@ -12,4 +12,3 @@ mod to_speech;
 
 pub use processor::VadProcessor;
 pub use stream::VadStreamReceiver;
-pub use to_speech::{DEFAULT_VAD_POLICY, VadPolicy};

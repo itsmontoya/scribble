@@ -1,10 +1,9 @@
 use anyhow::Result;
 
-use crate::decoder::SamplesSink;
 use crate::opts::Opts;
 use crate::segment_encoder::SegmentEncoder;
 
-/// Pluggable ASR backend used by [`crate::scribble::Scribble`].
+/// Pluggable ASR backend used by [`crate::Scribble`].
 ///
 /// A backend is responsible for turning mono `f32` samples at Scribble's target sample rate into `Segment`s written via a
 /// [`SegmentEncoder`].
@@ -43,7 +42,12 @@ pub trait Backend {
 }
 
 /// Streaming transcription interface returned by [`Backend::create_stream`].
-pub trait BackendStream: SamplesSink {
+pub trait BackendStream {
+    /// Consume a new chunk of mono `f32` samples at Scribble's target sample rate.
+    ///
+    /// Returning `Ok(false)` signals "stop early".
+    fn on_samples(&mut self, samples_16k_mono: &[f32]) -> Result<bool>;
+
     /// Flush and emit any final segments.
     fn finish(&mut self) -> Result<()>;
 }

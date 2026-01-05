@@ -242,13 +242,11 @@ mod tests {
 
     struct DummyStream;
 
-    impl SamplesSink for DummyStream {
+    impl BackendStream for DummyStream {
         fn on_samples(&mut self, _samples_16k_mono: &[f32]) -> Result<bool> {
             Ok(true)
         }
-    }
 
-    impl BackendStream for DummyStream {
         fn finish(&mut self) -> Result<()> {
             Ok(())
         }
@@ -343,13 +341,11 @@ mod tests {
 
     struct FinishErrStream;
 
-    impl SamplesSink for FinishErrStream {
+    impl BackendStream for FinishErrStream {
         fn on_samples(&mut self, _samples_16k_mono: &[f32]) -> Result<bool> {
             Ok(true)
         }
-    }
 
-    impl BackendStream for FinishErrStream {
         fn finish(&mut self) -> Result<()> {
             Err(anyhow::anyhow!("finish failed"))
         }

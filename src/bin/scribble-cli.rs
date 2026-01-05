@@ -6,12 +6,10 @@ use std::fs::File;
 use std::io::{self, Read};
 use tracing::error;
 
-use scribble::opts::Opts;
-use scribble::output_type::OutputType;
-use scribble::scribble::Scribble;
+use scribble::{Opts, OutputType, Scribble};
 
 fn main() {
-    scribble::logging::init();
+    scribble::init_logging();
 
     if let Err(err) = run() {
         error!(error = ?err, "scribble-cli failed");
