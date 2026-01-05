@@ -67,7 +67,7 @@ impl<W: Write> SegmentEncoder for JsonArrayEncoder<W> {
     /// Serialize a single segment and append it to the JSON array.
     fn write_segment(&mut self, seg: &Segment) -> Result<()> {
         if self.closed {
-            return Err(crate::Error::msg(
+            return Err(crate::Error::invalid_input(
                 "cannot write segment: encoder is already closed",
             ));
         }

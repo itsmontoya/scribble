@@ -47,7 +47,7 @@ impl<W: Write> SegmentEncoder for VttEncoder<W> {
     /// Write a single cue in WebVTT format.
     fn write_segment(&mut self, seg: &Segment) -> Result<()> {
         if self.closed {
-            return Err(crate::Error::msg(
+            return Err(crate::Error::invalid_input(
                 "cannot write segment: encoder is already closed",
             ));
         }

@@ -14,8 +14,6 @@
 use std::io::{BufWriter, Read, Write};
 use std::sync::mpsc;
 
-use anyhow::anyhow;
-
 use crate::Result;
 use crate::backend::{Backend, BackendStream};
 use crate::backends::whisper::WhisperBackend;
@@ -151,10 +149,9 @@ impl<B: Backend> Scribble<B> {
         }
 
         let Some(vad_model_path) = vad_model_path else {
-            return Err(anyhow!(
-                "VAD is enabled, but no VAD model path is configured for this Scribble instance"
-            )
-            .into());
+            return Err(crate::Error::invalid_input(
+                "VAD is enabled, but no VAD model path is configured for this Scribble instance",
+            ));
         };
 
         // We initialize a fresh VAD context per transcription.
@@ -192,7 +189,9 @@ impl<B: Backend> Scribble<B> {
         let rx = if opts.enable_voice_activity_detection {
             // We wrap the decoder receiver so the main loop can stay unchanged when VAD is enabled.
             // `VadStreamReceiver` is responsible for buffering and flushing VAD state.
-            let vad = vad.ok_or_else(|| anyhow!("VAD is enabled, but VAD failed to initialize"))?;
+            let vad = vad.ok_or_else(|| {
+                crate::Error::invalid_input("VAD is enabled, but VAD failed to initialize")
+            })?;
             let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
             SamplesRx::Vad(vad_rx)
         } else {
@@ -243,6 +242,7 @@ impl SamplesSink for ChannelSamplesSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error as _;
 
     struct DummyBackend;
 
@@ -300,7 +300,8 @@ mod tests {
         let err = merge_run_and_close(Err(run_err.into()), Err(close_err.into())).unwrap_err();
         let s = err.to_string();
         assert!(s.contains("close failed"));
-        assert!(s.contains("run failed"));
+        let source = err.source().map(|e| e.to_string()).unwrap_or_default();
+        assert!(source.contains("run failed"));
     }
 
     #[test]
@@ -431,8 +432,9 @@ mod tests {
             .transcribe_with_encoder(input, &opts, &mut encoder)
             .unwrap_err();
         let s = err.to_string();
-        assert!(s.contains("finish failed"));
         assert!(s.contains("failed to probe media stream"));
+        let source = err.source().map(|e| e.to_string()).unwrap_or_default();
+        assert!(source.contains("finish failed"));
     }
 
     struct PanicRead;
