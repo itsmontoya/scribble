@@ -257,6 +257,27 @@ println!("{json}");
 - [X] Add structured logs (tracing)
 - [ ] Expand test coverage to 80%+
 
+## Coverage
+
+This project uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) for coverage locally and in CI.
+
+One-time setup:
+
+```bash
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov
+```
+
+Run coverage locally:
+
+```bash
+# Print a summary to stdout
+cargo llvm-cov --all-features --all-targets
+
+# Generate an HTML report (writes to ./target/llvm-cov/html)
+cargo llvm-cov --all-features --all-targets --html
+```
+
 ## Status
 
 Scribble is under active development. The API is not yet stable, but the foundations are in place and evolving quickly.
