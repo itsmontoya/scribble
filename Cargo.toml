@@ -17,6 +17,7 @@ include = [
 description = "High-level Rust API for audio transcription using Whisper"
 license = "MIT"
 repository = "https://github.com/itsmontoya/scribble"
+documentation = "https://docs.rs/scribble"
 readme = "README.md"
 authors = ["Josh Montoya <josh@montoya.io>"]
 keywords = ["whisper", "transcription", "speech-to-text"]
