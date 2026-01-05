@@ -37,3 +37,10 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --all-features
+
+      - name: Publish (dry-run)
+        if: >
+          contains(github.event.pull_request.labels.*.name, 'patch') ||
+          contains(github.event.pull_request.labels.*.name, 'minor') ||
+          contains(github.event.pull_request.labels.*.name, 'major')
+        run: cargo publish --dry-run
