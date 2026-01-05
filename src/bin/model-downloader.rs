@@ -430,7 +430,8 @@ mod tests {
 
     #[test]
     fn args_parse_requires_name_unless_list() {
-        let err = Args::try_parse_from(["model-downloader"]).expect_err("expected missing-args error");
+        let err =
+            Args::try_parse_from(["model-downloader"]).expect_err("expected missing-args error");
         assert!(err.to_string().contains("--name"));
 
         let args = Args::try_parse_from(["model-downloader", "--list"]).expect("parse list params");
