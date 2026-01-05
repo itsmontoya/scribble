@@ -233,3 +233,97 @@ impl SamplesSink for ChannelSamplesSink {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct DummyBackend;
+
+    struct DummyStream;
+
+    impl SamplesSink for DummyStream {
+        fn on_samples(&mut self, _samples_16k_mono: &[f32]) -> Result<bool> {
+            Ok(true)
+        }
+    }
+
+    impl BackendStream for DummyStream {
+        fn finish(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Backend for DummyBackend {
+        type Stream<'a>
+            = DummyStream
+        where
+            Self: 'a;
+
+        fn transcribe_full(
+            &self,
+            _opts: &Opts,
+            _encoder: &mut dyn SegmentEncoder,
+            _samples: &[f32],
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn create_stream<'a>(
+            &'a self,
+            _opts: &'a Opts,
+            _encoder: &'a mut dyn SegmentEncoder,
+        ) -> Result<Self::Stream<'a>> {
+            Ok(DummyStream)
+        }
+    }
+
+    fn default_opts(output_type: OutputType) -> Opts {
+        Opts {
+            model_key: None,
+            enable_translate_to_english: false,
+            enable_voice_activity_detection: false,
+            language: None,
+            output_type,
+            incremental_min_window_seconds: 1,
+        }
+    }
+
+    #[test]
+    fn merge_run_and_close_prefers_run_error() {
+        let run_err = anyhow::anyhow!("run failed");
+        let close_err = anyhow::anyhow!("close failed");
+        let err = merge_run_and_close(Err(run_err), Err(close_err)).unwrap_err();
+        let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
+        assert!(chain.iter().any(|s| s.contains("close failed")));
+        assert!(chain.iter().any(|s| s.contains("run failed")));
+    }
+
+    #[test]
+    fn merge_run_and_close_surfaces_close_error_when_run_ok() {
+        let close_err = anyhow::anyhow!("close failed");
+        let err = merge_run_and_close(Ok(()), Err(close_err)).unwrap_err();
+        assert!(err.to_string().contains("close failed"));
+    }
+
+    #[test]
+    fn get_vad_returns_none_when_disabled() -> anyhow::Result<()> {
+        let scribble = Scribble::with_backend(DummyBackend);
+        let opts = default_opts(OutputType::Json);
+        let vad = Scribble::<DummyBackend>::get_vad(scribble.vad_model_path.as_deref(), &opts)?;
+        assert!(vad.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn get_vad_errors_when_enabled_but_missing_path() {
+        let scribble = Scribble::with_backend(DummyBackend);
+        let mut opts = default_opts(OutputType::Json);
+        opts.enable_voice_activity_detection = true;
+
+        let err =
+            Scribble::<DummyBackend>::get_vad(scribble.vad_model_path.as_deref(), &opts).err();
+        let err = err.expect("expected get_vad() to error");
+        assert!(err.to_string().contains("no VAD model path"));
+    }
+}

@@ -279,3 +279,36 @@ fn emit_mono_chunks(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn downmix_to_mono_single_channel_is_identity() {
+        let input = vec![0.0, 1.0, -1.0];
+        let mono = downmix_to_mono(&input, 1);
+        assert_eq!(mono, input);
+    }
+
+    #[test]
+    fn downmix_to_mono_averages_channels() {
+        // Two frames of stereo: (L=1, R=3), (L=-1, R=1) => mono: 2, 0
+        let interleaved = vec![1.0, 3.0, -1.0, 1.0];
+        let mono = downmix_to_mono(&interleaved, 2);
+        assert_eq!(mono, vec![2.0, 0.0]);
+    }
+
+    #[test]
+    fn emit_mono_chunks_respects_early_stop() -> anyhow::Result<()> {
+        let mut seen = Vec::new();
+        let mono = vec![1.0; 10];
+        emit_mono_chunks(&mono, 4, &mut |chunk| {
+            seen.push(chunk.len());
+            Ok(false)
+        })?;
+
+        assert_eq!(seen, vec![4]);
+        Ok(())
+    }
+}

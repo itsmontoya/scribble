@@ -16,3 +16,21 @@ pub struct Token {
 pub(crate) fn centiseconds_to_seconds(value: i64) -> f32 {
     if value < 0 { 0.0 } else { value as f32 / 100.0 }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centiseconds_to_seconds_clamps_negative_values() {
+        assert_eq!(centiseconds_to_seconds(-1), 0.0);
+        assert_eq!(centiseconds_to_seconds(-100), 0.0);
+    }
+
+    #[test]
+    fn centiseconds_to_seconds_converts_to_fractional_seconds() {
+        assert_eq!(centiseconds_to_seconds(0), 0.0);
+        assert_eq!(centiseconds_to_seconds(1), 0.01);
+        assert_eq!(centiseconds_to_seconds(250), 2.5);
+    }
+}

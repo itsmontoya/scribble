@@ -30,6 +30,46 @@ jobs:
       - name: Generate LCOV report
         run: cargo llvm-cov --all-features --all-targets --lcov --output-path lcov.info
 
+      - name: Coverage summary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("lcov.info")
+          if not path.exists():
+              raise SystemExit("missing lcov.info (expected from previous step)")
+
+          totals = {"LF": 0, "LH": 0, "FNF": 0, "FNH": 0, "BRF": 0, "BRH": 0}
+          for line in path.read_text().splitlines():
+              for key in totals:
+                  if line.startswith(f"{key}:"):
+                      totals[key] += int(line.split(":", 1)[1])
+
+          def pct(hit: int, found: int) -> float:
+              return 100.0 if found == 0 else (hit / found) * 100.0
+
+          md = "\n".join(
+              [
+                  "## Coverage summary",
+                  "",
+                  "| Metric | Covered | Total | % |",
+                  "|---|---:|---:|---:|",
+                  f"| Lines | {totals['LH']} | {totals['LF']} | {pct(totals['LH'], totals['LF']):.2f}% |",
+                  f"| Functions | {totals['FNH']} | {totals['FNF']} | {pct(totals['FNH'], totals['FNF']):.2f}% |",
+                  f"| Branches | {totals['BRH']} | {totals['BRF']} | {pct(totals['BRH'], totals['BRF']):.2f}% |",
+                  "",
+              ]
+          )
+
+          Path("coverage-summary.md").write_text(md)
+          print(md)
+          PY
+
+          cat coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload LCOV artifact
         uses: actions/upload-artifact@v4
         with:

@@ -241,3 +241,39 @@ pub const DEFAULT_VAD_POLICY: VadPolicy = VadPolicy {
     gap_merge_ms: 300,
     non_speech_gain: 0.0,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_non_speech_gain_in_place_mutes_only_non_speech_ranges() {
+        let mut samples = vec![1.0, 1.0, 1.0, 1.0, 1.0];
+        let ranges = vec![(1usize, 3usize)];
+        apply_non_speech_gain_in_place(&mut samples, &ranges, 0.0);
+        assert_eq!(samples, vec![0.0, 1.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn apply_non_speech_gain_in_place_clamps_gain_to_one() {
+        let mut samples = vec![0.25, 0.5, 1.0];
+        let ranges = vec![(0usize, 3usize)];
+        apply_non_speech_gain_in_place(&mut samples, &ranges, 2.0);
+        assert_eq!(samples, vec![0.25, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn scale_samples_fast_path_for_zero_gain() {
+        let mut buf = vec![0.25, -0.5];
+        scale_samples(&mut buf, 0.0);
+        assert_eq!(buf, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn ms_to_samples_rounds_to_nearest_sample() {
+        // At 16kHz: 0.5ms => 8 samples.
+        assert_eq!(ms_to_samples(0, 16_000.0), 0);
+        assert_eq!(ms_to_samples(1, 16_000.0), 16);
+        assert_eq!(ms_to_samples(33, 16_000.0), 528);
+    }
+}

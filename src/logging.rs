@@ -21,3 +21,14 @@ pub fn init() {
         )
         .try_init();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_is_idempotent() {
+        init();
+        init();
+    }
+}
