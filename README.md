@@ -1,4 +1,4 @@
-# Scribble &emsp; [![Build Status]][actions] [![Latest Version]][crates.io] [![Coverage]][actions]
+# Scribble &emsp; [![Build Status]][actions] [![Coverage]][actions] [![Latest Version]][crates.io]
 
 [Build Status]: https://img.shields.io/github/actions/workflow/status/itsmontoya/scribble/ci.yaml?branch=main
 [actions]: https://github.com/itsmontoya/scribble/actions?query=branch%3Amain
