@@ -109,3 +109,66 @@ impl<W: Write> SegmentEncoder for JsonArrayEncoder<W> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seg(start: f32, end: f32, text: &str) -> Segment {
+        Segment {
+            start_seconds: start,
+            end_seconds: end,
+            text: text.to_string(),
+            tokens: Vec::new(),
+            language_code: "en".to_string(),
+            next_speaker_turn: false,
+        }
+    }
+
+    #[test]
+    fn json_array_close_without_segments_emits_empty_array() -> anyhow::Result<()> {
+        let mut out = Vec::new();
+        let mut enc = JsonArrayEncoder::new(&mut out);
+        enc.close()?;
+        assert_eq!(std::str::from_utf8(&out)?, "[]");
+        Ok(())
+    }
+
+    #[test]
+    fn json_array_writes_valid_json_incrementally() -> anyhow::Result<()> {
+        let mut out = Vec::new();
+        let mut enc = JsonArrayEncoder::new(&mut out);
+
+        enc.write_segment(&seg(0.0, 1.0, "hello"))?;
+        enc.write_segment(&seg(1.0, 2.5, "world"))?;
+        enc.close()?;
+
+        let s = std::str::from_utf8(&out)?;
+        let parsed: serde_json::Value = serde_json::from_str(s)?;
+        let arr = parsed.as_array().expect("expected JSON array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["text"], "hello");
+        assert_eq!(arr[1]["text"], "world");
+        Ok(())
+    }
+
+    #[test]
+    fn json_array_close_is_idempotent() -> anyhow::Result<()> {
+        let mut out = Vec::new();
+        let mut enc = JsonArrayEncoder::new(&mut out);
+        enc.close()?;
+        enc.close()?;
+        assert_eq!(std::str::from_utf8(&out)?, "[]");
+        Ok(())
+    }
+
+    #[test]
+    fn json_array_write_after_close_errors() -> anyhow::Result<()> {
+        let mut out = Vec::new();
+        let mut enc = JsonArrayEncoder::new(&mut out);
+        enc.close()?;
+        let err = enc.write_segment(&seg(0.0, 1.0, "nope")).unwrap_err();
+        assert!(err.to_string().contains("already closed"));
+        Ok(())
+    }
+}

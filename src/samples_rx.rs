@@ -41,3 +41,20 @@ impl SamplesRx {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn samples_rx_plain_reports_disconnect_as_error() {
+        let (tx, rx) = mpsc::channel::<Vec<f32>>();
+        drop(tx);
+        let mut rx = SamplesRx::Plain(rx);
+        let err = rx.recv().unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("decoder output channel disconnected")
+        );
+    }
+}

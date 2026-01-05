@@ -121,3 +121,54 @@ struct Params {
     #[arg(short = 'l', long = "language")]
     pub language: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn params_parses_with_defaults() {
+        let params =
+            Params::try_parse_from(["scribble", "-m", "model.bin", "-v", "vad.bin", "-i", "-"])
+                .expect("parse params");
+
+        assert_eq!(params.input, "-");
+        assert!(matches!(params.output_type, OutputType::Vtt));
+        assert!(!params.enable_voice_activity_detection);
+        assert!(!params.enable_translation_to_english);
+        assert!(params.language.is_none());
+    }
+
+    #[test]
+    fn params_parses_all_flags() {
+        let params = Params::try_parse_from([
+            "scribble",
+            "-m",
+            "model.bin",
+            "-v",
+            "vad.bin",
+            "-i",
+            "-",
+            "-o",
+            "json",
+            "--enable-vad",
+            "-t",
+            "-l",
+            "en",
+        ])
+        .expect("parse params");
+
+        assert!(matches!(params.output_type, OutputType::Json));
+        assert!(params.enable_voice_activity_detection);
+        assert!(params.enable_translation_to_english);
+        assert_eq!(params.language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn open_input_errors_for_missing_file() {
+        let err = open_input("definitely-not-a-real-file")
+            .err()
+            .expect("expected open_input() to error");
+        assert!(err.to_string().contains("failed to open input file"));
+    }
+}

@@ -53,3 +53,67 @@ where
 
     Ok((samples, spec))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn wav_bytes(spec: WavSpec, samples: &[i16]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut writer =
+                hound::WavWriter::new(Cursor::new(&mut buf), spec).expect("create WAV writer");
+            for s in samples {
+                writer.write_sample(*s).expect("write sample");
+            }
+            writer.finalize().expect("finalize WAV");
+        }
+        buf
+    }
+
+    #[test]
+    fn wav_rejects_stereo_input() {
+        let spec = WavSpec {
+            channels: 2,
+            sample_rate: TARGET_SAMPLE_RATE,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let bytes = wav_bytes(spec, &[0i16; 16]);
+        let err = get_samples_from_wav_reader(Cursor::new(bytes)).unwrap_err();
+        assert!(err.to_string().contains("expected mono WAV"));
+    }
+
+    #[test]
+    fn wav_rejects_wrong_sample_rate() {
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: TARGET_SAMPLE_RATE + 1,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let bytes = wav_bytes(spec, &[0i16; 16]);
+        let err = get_samples_from_wav_reader(Cursor::new(bytes)).unwrap_err();
+        assert!(err.to_string().contains("expected 16000 Hz"));
+    }
+
+    #[test]
+    fn wav_normalizes_i16_pcm_samples() -> anyhow::Result<()> {
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: TARGET_SAMPLE_RATE,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let bytes = wav_bytes(spec, &[i16::MIN, -1, 0, 1, i16::MAX]);
+
+        let (samples, got_spec) = get_samples_from_wav_reader(Cursor::new(bytes))?;
+        assert_eq!(got_spec.channels, 1);
+        assert_eq!(got_spec.sample_rate, TARGET_SAMPLE_RATE);
+        assert_eq!(samples.len(), 5);
+        assert!(samples[2].abs() < f32::EPSILON);
+        assert!(samples[4] <= 1.0);
+        Ok(())
+    }
+}

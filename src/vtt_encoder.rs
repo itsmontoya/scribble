@@ -104,3 +104,62 @@ fn format_timestamp_vtt(seconds: f32) -> String {
 
     format!("{h:02}:{m:02}:{s:02}.{ms:03}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seg(start: f32, end: f32, text: &str) -> Segment {
+        Segment {
+            start_seconds: start,
+            end_seconds: end,
+            text: text.to_string(),
+            tokens: Vec::new(),
+            language_code: "en".to_string(),
+            next_speaker_turn: false,
+        }
+    }
+
+    #[test]
+    fn vtt_close_without_segments_emits_nothing() -> anyhow::Result<()> {
+        let mut out = Vec::new();
+        let mut enc = VttEncoder::new(&mut out);
+        enc.close()?;
+        assert_eq!(std::str::from_utf8(&out)?, "");
+        Ok(())
+    }
+
+    #[test]
+    fn vtt_writes_header_once_and_formats_cues() -> anyhow::Result<()> {
+        let mut out = Vec::new();
+        let mut enc = VttEncoder::new(&mut out);
+
+        enc.write_segment(&seg(0.0, 1.2345, "hello"))?;
+        enc.write_segment(&seg(61.2, 62.0, "world"))?;
+        enc.close()?;
+
+        let s = std::str::from_utf8(&out)?;
+        assert!(s.starts_with("WEBVTT\n\n"));
+        assert!(s.contains("00:00:00.000 --> 00:00:01.235\nhello\n\n"));
+        assert!(s.contains("00:01:01.200 --> 00:01:02.000\nworld\n\n"));
+        assert_eq!(s.matches("WEBVTT\n\n").count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn vtt_format_timestamp_rounds_to_nearest_millisecond() {
+        assert_eq!(format_timestamp_vtt(0.0004), "00:00:00.000");
+        assert_eq!(format_timestamp_vtt(0.0005), "00:00:00.001");
+        assert_eq!(format_timestamp_vtt(1.9995), "00:00:02.000");
+    }
+
+    #[test]
+    fn vtt_write_after_close_errors() -> anyhow::Result<()> {
+        let mut out = Vec::new();
+        let mut enc = VttEncoder::new(&mut out);
+        enc.close()?;
+        let err = enc.write_segment(&seg(0.0, 1.0, "nope")).unwrap_err();
+        assert!(err.to_string().contains("already closed"));
+        Ok(())
+    }
+}
