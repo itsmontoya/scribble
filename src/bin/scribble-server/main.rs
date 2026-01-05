@@ -395,7 +395,10 @@ mod tests {
     fn validate_media_prefix_accepts_wav_fixture() {
         let bytes = std::fs::read("tests/fixtures/jfk.wav").expect("read wav fixture");
         if let Err(err) = validate_media_prefix(&bytes) {
-            panic!("expected WAV fixture to probe successfully: {}", err.message);
+            panic!(
+                "expected WAV fixture to probe successfully: {}",
+                err.message
+            );
         }
     }
 }

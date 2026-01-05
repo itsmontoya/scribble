@@ -430,7 +430,11 @@ mod tests {
             .unwrap_err();
         let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
         assert!(chain.iter().any(|s| s.contains("finish failed")));
-        assert!(chain.iter().any(|s| s.contains("failed to probe media stream")));
+        assert!(
+            chain
+                .iter()
+                .any(|s| s.contains("failed to probe media stream"))
+        );
     }
 
     struct PanicRead;
@@ -457,17 +461,11 @@ mod tests {
 
     impl std::io::Write for FailingWriter {
         fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "write failed",
-            ))
+            Err(std::io::Error::other("write failed"))
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "flush failed",
-            ))
+            Err(std::io::Error::other("flush failed"))
         }
     }
 

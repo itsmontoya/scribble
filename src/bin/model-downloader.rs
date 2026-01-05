@@ -430,13 +430,10 @@ mod tests {
 
     #[test]
     fn args_parse_requires_name_unless_list() {
-        let err = Args::try_parse_from(["model-downloader"])
-            .err()
-            .expect("expected missing-args error");
+        let err = Args::try_parse_from(["model-downloader"]).expect_err("expected missing-args error");
         assert!(err.to_string().contains("--name"));
 
-        let args =
-            Args::try_parse_from(["model-downloader", "--list"]).expect("parse list params");
+        let args = Args::try_parse_from(["model-downloader", "--list"]).expect("parse list params");
         assert!(args.list);
         assert!(args.name.is_none());
     }
@@ -469,10 +466,7 @@ mod tests {
     impl Read for ErrorAfterNBytes {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
             if self.pos >= self.fail_at {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "simulated read failure",
-                ));
+                return Err(std::io::Error::other("simulated read failure"));
             }
 
             let remaining = &self.bytes[self.pos..];
