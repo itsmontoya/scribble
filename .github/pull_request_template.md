@@ -24,6 +24,7 @@ Focus on intent/behavior, not a line-by-line diff.
 - [ ] cargo clippy --all-targets --all-features -- -D warnings
 - [ ] cargo check --all-features
 - [ ] cargo test --all-features
+- [ ] Cargo.lock updated (if dependencies changed)
 
 ## Follow-ups
 - 
