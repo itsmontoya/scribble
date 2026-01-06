@@ -163,7 +163,7 @@ jobs:
 
       - name: Publish (skip if token missing)
         if: env.CARGO_REGISTRY_TOKEN != ''
-        run: cargo publish
+        run: cargo publish --locked
 
       - name: Note (token missing)
         if: env.CARGO_REGISTRY_TOKEN == ''
