@@ -39,7 +39,13 @@ Scribble targets Rust **1.92.0** (pinned in `rust-toolchain.toml`, declared as `
 Clone the repository and build the binaries:
 
 ```bash
-cargo build --release
+cargo build --release --all-features
+```
+
+Or build a single binary to a target directory:
+
+```bash
+./scripts/build.sh scribble-cli ./dist
 ```
 
 This will produce the following binaries:
@@ -55,7 +61,7 @@ This will produce the following binaries:
 ### List available models
 
 ```bash
-cargo run --bin model-downloader -- --list
+cargo run --features bin-model-downloader --bin model-downloader -- --list
 ```
 
 Example output:
@@ -76,7 +82,7 @@ VAD models:
 ### Download a model
 
 ```bash
-cargo run --bin model-downloader -- --name large-v3-turbo
+cargo run --features bin-model-downloader --bin model-downloader -- --name large-v3-turbo
 ```
 
 By default, models are downloaded into `./models`.
@@ -84,7 +90,7 @@ By default, models are downloaded into `./models`.
 ### Download into a custom directory
 
 ```bash
-cargo run --bin model-downloader -- \
+cargo run --features bin-model-downloader --bin model-downloader -- \
   --name silero-v6.2.0 \
   --dir /opt/scribble/models
 ```
@@ -108,7 +114,7 @@ It accepts audio or video containers and normalizes them to Whisper’s required
 ### Basic transcription (VTT output)
 
 ```bash
-cargo run --bin scribble-cli -- \
+cargo run --features bin-scribble-cli --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
   --vad-model ./models/ggml-silero-v6.2.0.bin \
   --input ./input.mp4
@@ -123,7 +129,7 @@ Output is written to `stdout` in WebVTT format by default.
 ### Start the server
 
 ```bash
-cargo run --bin scribble-server -- \
+cargo run --features bin-scribble-server --bin scribble-server -- \
   --model ./models/ggml-large-v3-turbo.bin \
   --vad-model ./models/ggml-silero-v6.2.0.bin \
   --host 127.0.0.1 \
@@ -178,7 +184,7 @@ All binaries emit structured JSON logs to `stderr`.
 ### JSON output
 
 ```bash
-cargo run --bin scribble-cli -- \
+cargo run --features bin-scribble-cli --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
   --vad-model ./models/ggml-silero-v6.2.0.bin \
   --input ./input.wav \
@@ -188,7 +194,7 @@ cargo run --bin scribble-cli -- \
 ### Enable voice activity detection (VAD)
 
 ```bash
-cargo run --bin scribble-cli -- \
+cargo run --features bin-scribble-cli --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
   --vad-model ./models/ggml-silero-v6.2.0.bin \
   --enable-vad \
@@ -203,7 +209,7 @@ When VAD is enabled:
 ### Specify language explicitly
 
 ```bash
-cargo run --bin scribble-cli -- \
+cargo run --features bin-scribble-cli --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
   --vad-model ./models/ggml-silero-v6.2.0.bin \
   --input ./input.wav \
@@ -215,7 +221,7 @@ If `--language` is omitted, Whisper will auto-detect.
 ### Write output to a file
 
 ```bash
-cargo run --bin scribble-cli -- \
+cargo run --features bin-scribble-cli --bin scribble-cli -- \
   --model ./models/ggml-large-v3-turbo.bin \
   --vad-model ./models/ggml-silero-v6.2.0.bin \
   --input ./input.wav \
