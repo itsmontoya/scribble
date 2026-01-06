@@ -105,7 +105,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build all bins
-        run: cargo build --release --bins
+        run: cargo build --locked --release --all-features --bins
 
       - name: Collect binaries
         shell: bash
