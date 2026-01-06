@@ -138,12 +138,12 @@ esac
 echo "==> Building release binaries"
 if [ "${#BINS[@]}" -gt 0 ]; then
   for b in "${BINS[@]}"; do
-    echo "    - cargo build --release --bin $b --target $TARGET"
-    cargo build --release --bin "$b" --target "$TARGET"
+    echo "    - cargo build --release --all-features --bin $b --target $TARGET"
+    cargo build --release --all-features --bin "$b" --target "$TARGET"
   done
 else
-  echo "    - cargo build --release --bins --target $TARGET"
-  cargo build --release --bins --target "$TARGET"
+  echo "    - cargo build --release --all-features --bins --target $TARGET"
+  cargo build --release --all-features --bins --target "$TARGET"
 fi
 
 DIST_DIR="$REPO_ROOT/dist-macos"
