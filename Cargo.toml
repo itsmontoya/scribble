@@ -30,7 +30,7 @@ categories = ["multimedia::audio"]
 
 [dependencies]
 anyhow = "1"
-axum = { version = "0.8.7", optional = true, features = ["multipart"] }
+axum = { version = "0.8.8", optional = true, features = ["multipart"] }
 clap = { version = "4.5", optional = true, features = ["derive"] }
 hound = "3"
 num_cpus = "1"
