@@ -1,4 +1,4 @@
-# Scribble &emsp; [![Build Status]][actions] [![Coverage]][actions] [![Latest Version]][crates.io] [![Docs Badge]][Docs URL] [![MIT licensed][License Badge]][License URL]
+# Scribble &emsp; [![Build Status]][actions] [![Coverage]][actions] [![Latest Version]][crates.io] [![Docs Badge]][Docs URL] [![Report Card Badge]][Report Card URL] [![MIT licensed][License Badge]][License URL]
 
 [Build Status]: https://img.shields.io/github/actions/workflow/status/itsmontoya/scribble/ci.yaml?branch=main
 [actions]: https://github.com/itsmontoya/scribble/actions?query=branch%3Amain
@@ -9,6 +9,8 @@
 [License URL]: https://github.com/itsmontoya/scribble/blob/main/LICENSE
 [Docs Badge]: https://img.shields.io/badge/docs.rs-scribble-CE422B
 [Docs URL]: https://docs.rs/scribble/latest/scribble/
+[Report Card URL]: https://rust-reportcard.xuri.me/report/github.com/itsmontoya/scribble
+[Report Card Badge]: https://rust-reportcard.xuri.me/badge/github.com/itsmontoya/scribble
 
 Scribble is a fast, lightweight transcription engine written in Rust, with a built-in Whisper backend and a backend trait for custom implementations.
 
