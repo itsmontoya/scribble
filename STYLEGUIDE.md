@@ -58,6 +58,8 @@ When making code changes, we run the following before considering a change compl
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo check --all-features`
+- `cargo test --all-features`
 
 We treat formatting and clippy warnings as part of the API contract, not optional hygiene.
 
