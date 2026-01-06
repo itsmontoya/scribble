@@ -19,10 +19,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust (MSRV) + components
-        uses: dtolnay/rust-toolchain@master
+      - name: Install Rust (stable) + components
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.92.0
           components: rustfmt, clippy
 
       - name: Cargo cache
