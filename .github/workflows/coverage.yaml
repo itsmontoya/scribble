@@ -71,7 +71,7 @@ jobs:
           cat coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload LCOV artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: lcov.info
           path: lcov.info
