@@ -11,7 +11,11 @@
 //! - `finalize()` should be called at end-of-stream to flush any remaining resampler input.
 
 use anyhow::{Context, Result, anyhow, bail};
-use rubato::{Resampler, SincFixedIn, WindowFunction};
+use audioadapter_buffers::direct::SequentialSliceOfVecs;
+use rubato::{
+    Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction,
+};
 use symphonia::core::audio::{AudioBufferRef, SampleBuffer};
 
 /// Scribble's target mono sample rate (Hz).
@@ -23,16 +27,16 @@ pub struct AudioPipeline {
     sample_buf_f32: Option<SampleBuffer<f32>>,
 
     // Lazily initialized resampler (only needed when the source sample rate != 16 kHz).
-    resampler: Option<SincFixedIn<f32>>,
+    resampler: Option<Async<f32>>,
 
     // Accumulator for mono source samples before feeding full blocks into rubato.
     mono_src_acc: Vec<f32>,
 
-    // Reusable mono input channel buffer for rubato (we pass a single channel Vec).
-    resample_in_chan: Vec<f32>,
+    // Reusable mono input buffer for rubato (one channel).
+    resample_in: Vec<Vec<f32>>,
 
-    // Reusable mono output channel buffer from rubato (avoids cloning the output Vec).
-    resample_out_chan: Vec<f32>,
+    // Reusable mono output buffer for rubato (one channel).
+    resample_out: Vec<Vec<f32>>,
 }
 
 /// Creates an empty audio pipeline with no buffered samples or initialized resampler.
@@ -49,8 +53,8 @@ impl AudioPipeline {
             sample_buf_f32: None,
             resampler: None,
             mono_src_acc: Vec::new(),
-            resample_in_chan: Vec::new(),
-            resample_out_chan: Vec::new(),
+            resample_in: vec![Vec::new()],
+            resample_out: vec![Vec::new()],
         }
     }
 
@@ -98,16 +102,16 @@ impl AudioPipeline {
         }
 
         // rubato expects exact block sizes; pad the remainder with zeros.
-        let in_max = rs.input_frames_max();
-        let rem = self.mono_src_acc.len() % in_max;
+        let in_next = rs.input_frames_next();
+        let rem = self.mono_src_acc.len() % in_next;
         if rem != 0 {
             self.mono_src_acc
-                .resize(self.mono_src_acc.len() + (in_max - rem), 0.0);
+                .resize(self.mono_src_acc.len() + (in_next - rem), 0.0);
         }
 
         while !self.mono_src_acc.is_empty() {
             // Drain exactly one input block.
-            let block: Vec<f32> = self.mono_src_acc.drain(..in_max).collect();
+            let block: Vec<f32> = self.mono_src_acc.drain(..in_next).collect();
 
             let out = self.resample_block_into_out(&block)?;
             emit_mono_chunks(out, target_chunk_frames, &mut emit)?;
@@ -125,21 +129,27 @@ impl AudioPipeline {
         // Tradeoff: larger chunks = better throughput; smaller chunks = lower latency.
         let in_chunk_src_frames = 2048;
 
-        let rs = SincFixedIn::<f32>::new(
-            TARGET_SAMPLE_RATE as f64 / src_rate as f64,
+        let ratio = TARGET_SAMPLE_RATE as f64 / src_rate as f64;
+        let rs = Async::<f32>::new_sinc(
+            ratio,
             2.0,
-            rubato::SincInterpolationParameters {
+            &SincInterpolationParameters {
                 sinc_len: 256,
                 f_cutoff: 0.95,
-                interpolation: rubato::SincInterpolationType::Linear,
+                interpolation: SincInterpolationType::Linear,
                 oversampling_factor: 256,
                 window: WindowFunction::BlackmanHarris2,
             },
             in_chunk_src_frames,
             1, // mono
+            FixedAsync::Input,
         )
-        .map_err(|e| anyhow!(e))
+        .map_err(anyhow::Error::new)
         .context("failed to init resampler")?;
+
+        // Pre-allocate output buffers sized to rubato's max output for our configuration.
+        let out_max = rs.output_frames_max();
+        self.resample_out[0].resize(out_max, 0.0);
 
         self.resampler = Some(rs);
         Ok(())
@@ -158,16 +168,16 @@ impl AudioPipeline {
                 .resampler
                 .as_ref()
                 .ok_or_else(|| anyhow!("resampler not initialized"))?;
-            let in_max = rs.input_frames_max();
+            let in_next = rs.input_frames_next();
 
-            if self.mono_src_acc.len() < in_max {
+            if self.mono_src_acc.len() < in_next {
                 break;
             }
 
-            let block: Vec<f32> = self.mono_src_acc.drain(..in_max).collect();
+            let block: Vec<f32> = self.mono_src_acc.drain(..in_next).collect();
             let out = self.resample_block_into_out(&block)?;
 
-            // `out` is a borrowed view into `self.resample_out_chan`.
+            // `out` is a borrowed view into `self.resample_out`.
             // Emit in fixed-size chunks.
             for chunk in out.chunks(target_chunk_frames) {
                 if !emit(chunk)? {
@@ -190,21 +200,26 @@ impl AudioPipeline {
             .ok_or_else(|| anyhow!("resampler not initialized"))?;
 
         // Build rubato’s expected `Vec<Vec<f32>>` input (one channel for mono).
-        self.resample_in_chan.clear();
-        self.resample_in_chan.extend_from_slice(mono_src_block);
+        self.resample_in[0].clear();
+        self.resample_in[0].extend_from_slice(mono_src_block);
 
-        let input = vec![self.resample_in_chan.clone()];
-        let out = rs
-            .process(&input, None)
+        let input = SequentialSliceOfVecs::new(&self.resample_in, 1, mono_src_block.len())
+            .map_err(|e| anyhow!(e))?;
+
+        let out_max = rs.output_frames_max();
+        if self.resample_out[0].len() < out_max {
+            self.resample_out[0].resize(out_max, 0.0);
+        }
+
+        let mut output = SequentialSliceOfVecs::new_mut(&mut self.resample_out, 1, out_max)
+            .map_err(|e| anyhow!(e))?;
+
+        let (_frames_in, frames_out) = rs
+            .process_into_buffer(&input, &mut output, None)
             .map_err(|e| anyhow!(e))
             .context("resampler process failed")?;
 
-        if out.len() != 1 {
-            bail!("expected mono output from resampler");
-        }
-
-        self.resample_out_chan = out[0].clone();
-        Ok(&self.resample_out_chan)
+        Ok(&self.resample_out[0][..frames_out])
     }
 }
 
