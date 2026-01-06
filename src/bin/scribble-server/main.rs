@@ -143,10 +143,10 @@ async fn run() -> Result<()> {
 
     let app = Router::new()
         .route("/", get(root))
-        .route("/healthz", get(healthz))
+        .route("/health", get(health))
         .route("/metrics", get(metrics::prometheus_metrics))
-        .route("/v1/models", get(models))
-        .route("/v1/transcribe", post(transcribe))
+        .route("/models", get(models))
+        .route("/transcribe", post(transcribe))
         .route_layer(from_fn(metrics::track_http_metrics))
         .with_state(state)
         .layer(DefaultBodyLimit::max(params.max_bytes))
@@ -169,10 +169,10 @@ async fn run() -> Result<()> {
 }
 
 async fn root() -> &'static str {
-    "scribble-server: POST /v1/transcribe (multipart field: file)"
+    "scribble-server: POST /transcribe (multipart field: file)"
 }
 
-async fn healthz() -> &'static str {
+async fn health() -> &'static str {
     "ok"
 }
 
