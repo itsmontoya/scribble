@@ -124,7 +124,7 @@ pub async fn track_http_metrics(req: Request<Body>, next: Next) -> Response {
         .unwrap_or_else(|| req.uri().path())
         .to_owned();
 
-    if route == "/metrics" || route == "/healthz" {
+    if route == "/metrics" || route == "/health" {
         return next.run(req).await;
     }
 

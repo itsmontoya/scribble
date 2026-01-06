@@ -140,7 +140,7 @@ cargo run --features bin-scribble-server --bin scribble-server -- \
 
 ```bash
 curl -sS --data-binary @./input.mp4 \
-  "http://127.0.0.1:8080/v1/transcribe?output=vtt" \
+  "http://127.0.0.1:8080/transcribe?output=vtt" \
   > transcript.vtt
 ```
 
@@ -148,7 +148,7 @@ For JSON output:
 
 ```bash
 curl -sS --data-binary @./input.wav \
-  "http://127.0.0.1:8080/v1/transcribe?output=json" \
+  "http://127.0.0.1:8080/transcribe?output=json" \
   > transcript.json
 ```
 
@@ -156,7 +156,7 @@ Example using all query params:
 
 ```bash
 curl -sS --data-binary @./input.mp4 \
-  "http://127.0.0.1:8080/v1/transcribe?output=json&output_type=json&model_key=ggml-large-v3-turbo.bin&enable_vad=true&translate_to_english=true&language=en" \
+  "http://127.0.0.1:8080/transcribe?output=json&output_type=json&model_key=ggml-large-v3-turbo.bin&enable_vad=true&translate_to_english=true&language=en" \
   > transcript.json
 ```
 
