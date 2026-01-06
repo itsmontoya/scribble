@@ -1,5 +1,3 @@
-use clap::ValueEnum;
-
 /// The supported output formats for encoded transcription segments.
 ///
 /// Why this exists:
@@ -9,9 +7,11 @@ use clap::ValueEnum;
 ///   selection explicit and discoverable.
 ///
 /// Integration notes:
-/// - `ValueEnum` allows this enum to be used directly as a CLI flag with `clap`.
+/// - When the `cli` feature is enabled, we derive `clap::ValueEnum` so the enum can be used
+///   directly as a CLI flag.
 /// - Each variant maps to a concrete `SegmentEncoder` implementation.
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 pub enum OutputType {
     /// Output segments as a JSON array.
     Json,

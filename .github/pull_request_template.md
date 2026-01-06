@@ -23,6 +23,9 @@ Focus on intent/behavior, not a line-by-line diff.
 - [ ] cargo fmt --all -- --check
 - [ ] cargo clippy --all-targets --all-features -- -D warnings
 - [ ] cargo test
+- [ ] cargo check
+- [ ] cargo check --all-features
+- [ ] cargo test --all-features
 
 ## Follow-ups
 - 

@@ -30,24 +30,61 @@ categories = ["multimedia::audio"]
 
 [dependencies]
 anyhow = "1"
-axum = { version = "0.8.7", features = ["multipart"] }
-clap = { version = "4.5", features = ["derive"] }
+axum = { version = "0.8.7", optional = true, features = ["multipart"] }
+clap = { version = "4.5", optional = true, features = ["derive"] }
 hound = "3"
 num_cpus = "1"
 whisper-rs = { version = "0.15" }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util"] }
-tokio-util = { version = "0.7", features = ["io", "io-util"] }
-futures-util = "0.3"
+tokio = { version = "1", optional = true, features = ["rt-multi-thread", "macros", "io-util", "net", "sync"] }
+tokio-util = { version = "0.7", optional = true, features = ["io", "io-util"] }
+futures-util = { version = "0.3", optional = true }
 uuid = { version = "1", features = ["v4"] }
-indicatif = "0.18"
-reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }
+indicatif = { version = "0.18", optional = true }
+reqwest = { version = "0.12", optional = true, features = ["blocking", "rustls-tls"] }
 rubato = "0.16"
 symphonia = { version = "0.5", features = ["all"] }
 tempfile = "3"
-prometheus = "0.14"
-tower-http = { version = "0.6", features = ["trace"] }
+prometheus = { version = "0.14", optional = true }
+tower-http = { version = "0.6", optional = true, features = ["trace"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter", "json"] }
 thiserror = "2"
+
+[features]
+# Keep the default build lean for library consumers. Binaries opt into their own feature sets.
+default = []
+
+# Shared helpers for binaries.
+cli = ["dep:clap"]
+logging = ["dep:tracing-subscriber"]
+
+# Binary feature groups.
+bin-scribble-cli = ["cli", "logging"]
+bin-model-downloader = ["cli", "dep:indicatif", "dep:reqwest"]
+bin-scribble-server = [
+  "cli",
+  "logging",
+  "dep:axum",
+  "dep:futures-util",
+  "dep:prometheus",
+  "dep:tokio",
+  "dep:tokio-util",
+  "dep:tower-http",
+]
+
+[[bin]]
+name = "scribble-cli"
+path = "src/bin/scribble-cli.rs"
+required-features = ["bin-scribble-cli"]
+
+[[bin]]
+name = "model-downloader"
+path = "src/bin/model-downloader.rs"
+required-features = ["bin-model-downloader"]
+
+[[bin]]
+name = "scribble-server"
+path = "src/bin/scribble-server/main.rs"
+required-features = ["bin-scribble-server"]
