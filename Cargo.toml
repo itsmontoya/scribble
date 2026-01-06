@@ -1,6 +1,5 @@
 [package]
 name = "scribble"
-rust-version = "1.92"
 version = "0.4.2"
 edition = "2024"
 
@@ -28,6 +27,9 @@ authors = ["Josh Montoya <josh@montoya.io>"]
 keywords = ["whisper", "transcription", "speech-to-text"]
 categories = ["multimedia::audio"]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8.7", optional = true, features = ["multipart"] }
@@ -48,7 +50,7 @@ tokio-util = { version = "0.7", optional = true, features = ["io", "io-util"] }
 futures-util = { version = "0.3", optional = true }
 uuid = { version = "1", features = ["v4"] }
 indicatif = { version = "0.18", optional = true }
-reqwest = { version = "^0.13.1", optional = true, features = [
+reqwest = { version = "0.13.1", optional = true, default-features = false, features = [
   "blocking",
   "rustls",
 ] }
