@@ -8,19 +8,21 @@ Our goal is simple: boring, explicit, well-documented Rust with predictable beha
 ## Documentation & comments
 
 Our goals:
-- We write generous but purposeful comments: explain *why* a choice exists, what tradeoff we accepted, and what invariant we rely on.
-- We keep public APIs well-documented and unsurprising: clear names, clear inputs/outputs, and clear failure modes.
-- We use “we” in comments and documentation to describe design intent and decisions.
+- Write purposeful comments: capture *why* a choice exists, the tradeoff, and the invariant.
+- Keep public APIs well-documented and unsurprising: clear names, clear inputs/outputs, and clear failure modes.
+- Prefer concise, neutral voice. Avoid chatty or “collective” phrasing (e.g., “we …”) unless it adds necessary context.
 
 Guidelines:
 - Prefer module/type/function documentation for “why” and “how to use”; prefer inline comments only when the code’s intent is not obvious.
 - If a decision has a non-obvious tradeoff, we document it near the decision.
-- We avoid narrating code (“we increment i”) unless it clarifies an invariant or edge case.
+- Avoid narrating code (“increment i”) unless it clarifies an invariant or edge case.
+- Prefer short sentences. If a comment needs multiple points, use a small bullet list.
 
 Voice examples:
-- ✅ “We buffer at least N bytes so downstream processing is amortized and predictable.”
-- ✅ “We return EOF early here to preserve streaming semantics.”
-- ❌ “We call read() and then process_bytes().”
+- ✅ “Buffers at least N bytes so downstream processing is amortized and predictable.”
+- ✅ “Returns EOF early to preserve streaming semantics.”
+- ❌ “Calls read() and then process_bytes().”
+- ❌ “We do X here to make things nicer.”
 
 Public API documentation should answer:
 - What it does (one sentence)
