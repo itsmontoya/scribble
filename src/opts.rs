@@ -32,7 +32,7 @@ pub struct Opts {
 
     /// Optional language hint (e.g. `"en"`, `"es"`).
     ///
-    /// When `None`, we allow Whisper to auto-detect the spoken language.
+    /// When `None`, Whisper auto-detects the spoken language.
     /// This field exists to support future CLI flags or API usage.
     pub language: Option<String>,
 

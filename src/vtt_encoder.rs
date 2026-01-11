@@ -7,15 +7,15 @@ use crate::segments::Segment;
 /// A `SegmentEncoder` that writes segments in WebVTT format.
 ///
 /// Design:
-/// - We stream output directly to a `Write` implementation.
-/// - We write the WebVTT header lazily on the first segment so that:
+/// - Streams output directly to a `Write` implementation.
+/// - Writes the WebVTT header lazily on the first segment so that:
 ///   - callers can construct the encoder without immediately writing output
 ///   - even "no segments" runs still behave predictably (close just flushes)
 pub struct VttEncoder<W: Write> {
-    /// The underlying writer we stream VTT into.
+    /// The underlying writer receiving VTT output.
     w: W,
 
-    /// Whether we've written the `WEBVTT` header.
+    /// Whether the `WEBVTT` header has been written.
     started: bool,
 
     /// Whether the encoder has been closed.
@@ -32,7 +32,7 @@ impl<W: Write> VttEncoder<W> {
         }
     }
 
-    /// Write the WebVTT header if we haven't written it yet.
+    /// Write the WebVTT header if it hasn't been written yet.
     fn start_if_needed(&mut self) -> Result<()> {
         if !self.started {
             // WebVTT files begin with a mandatory header line followed by a blank line.
@@ -61,8 +61,7 @@ impl<W: Write> SegmentEncoder for VttEncoder<W> {
         // Cue timing line.
         writeln!(&mut self.w, "{start} --> {end}")?;
 
-        // Cue text. (We write it verbatim; if we later want to sanitize/escape,
-        // this is where we'd do it.)
+        // Cue text is written verbatim.
         writeln!(&mut self.w, "{}", seg.text)?;
 
         // Blank line separates cues.
@@ -80,7 +79,7 @@ impl<W: Write> SegmentEncoder for VttEncoder<W> {
             return Ok(());
         }
 
-        // We flush so callers get output immediately (especially important for streaming to stdout).
+        // Flush so callers get output immediately (especially important for streaming to stdout).
         self.w.flush()?;
         self.closed = true;
 
@@ -91,7 +90,7 @@ impl<W: Write> SegmentEncoder for VttEncoder<W> {
 /// Format seconds into a WebVTT timestamp (`HH:MM:SS.mmm`).
 ///
 /// Rounding policy:
-/// - We round to the nearest millisecond to reduce drift when converting from `f32`.
+/// - Rounds to the nearest millisecond to reduce drift when converting from `f32`.
 fn format_timestamp_vtt(seconds: f32) -> String {
     let total_ms = (seconds * 1000.0).round() as u64;
 

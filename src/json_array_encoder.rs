@@ -7,9 +7,9 @@ use crate::segments::Segment;
 /// A `SegmentEncoder` that writes segments as a single JSON array.
 ///
 /// Design:
-/// - We stream output directly to a `Write` implementation to avoid buffering
+/// - Streams output directly to a `Write` implementation to avoid buffering
 ///   all segments in memory.
-/// - The encoder is stateful so we can emit a well-formed JSON array incrementally.
+/// - The encoder is stateful so it can emit a well-formed JSON array incrementally.
 ///
 /// Example output:
 /// ```json
@@ -19,10 +19,10 @@ use crate::segments::Segment;
 /// ]
 /// ```
 pub struct JsonArrayEncoder<W: Write> {
-    /// The underlying writer we stream JSON into.
+    /// The underlying writer receiving JSON output.
     w: W,
 
-    /// Whether we have written the opening `[` of the JSON array.
+    /// Whether the opening `[` of the JSON array has been written.
     started: bool,
 
     /// Whether the next element will be the first element in the array.
@@ -38,7 +38,7 @@ impl<W: Write> JsonArrayEncoder<W> {
     /// Create a new JSON array encoder that writes to the given writer.
     ///
     /// At creation time:
-    /// - We have not written anything yet.
+    /// - No output is written yet.
     /// - The JSON array is opened lazily on the first write or on close.
     pub fn new(w: W) -> Self {
         Self {
@@ -49,11 +49,11 @@ impl<W: Write> JsonArrayEncoder<W> {
         }
     }
 
-    /// Write the opening `[` of the JSON array if we have not already done so.
+    /// Write the opening `[` of the JSON array if it has not already been written.
     ///
-    /// We defer writing the opening bracket so that:
+    /// Defers writing the opening bracket so that:
     /// - Empty output still results in valid JSON (`[]`)
-    /// - We do not emit partial output unless a segment is actually written
+    /// - Partial output is not emitted unless a segment is actually written
     fn start_if_needed(&mut self) -> Result<()> {
         if !self.started {
             self.w.write_all(b"[")?;
@@ -100,7 +100,7 @@ impl<W: Write> SegmentEncoder for JsonArrayEncoder<W> {
             return Ok(());
         }
 
-        // Ensure we still output a valid JSON array even if no segments were written.
+        // Ensure a valid JSON array even if no segments were written.
         self.start_if_needed()?;
 
         // Close the JSON array.

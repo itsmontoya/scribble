@@ -3,7 +3,7 @@ use serde::Serialize;
 
 /// A single transcription segment produced by an ASR backend.
 ///
-/// We keep this struct format-focused:
+/// Keeps this struct format-focused:
 /// - timestamps are in seconds (f32 is sufficient for typical subtitle timing)
 /// - `text` is the raw segment text returned by the backend
 /// - `language_code` is included for forward compatibility (see notes below)
@@ -15,14 +15,13 @@ pub struct Segment {
 
     /// Tokens that make up this segment.
     ///
-    /// We include token-level timing and probabilities so consumers can build
-    /// detailed overlays or custom renderers without re-tokenizing.
+    /// Includes token-level timing and probabilities so consumers can build detailed overlays or
+    /// custom renderers without re-tokenizing.
     pub tokens: Vec<Token>,
 
     /// Language of the segment as a short code (e.g. "en", "es").
     ///
-    /// Today we default this because we are not yet running per-segment language detection.
-    /// When we add language detection, we can populate this field more accurately.
+    /// Defaults to a placeholder until per-segment language detection is implemented.
     pub language_code: String,
 
     /// True if the next segment begins a new speaker turn.

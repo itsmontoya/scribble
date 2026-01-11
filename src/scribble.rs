@@ -1,11 +1,11 @@
 //! High-level API for running transcriptions with Scribble.
 //!
-//! We expose a single, ergonomic entry point (`Scribble`) that wraps the lower-level
-//! backend, decoding, and encoding logic.
+//! Provides a single, ergonomic entry point (`Scribble`) that wraps the lower-level backend,
+//! decoding, and encoding logic.
 //!
 //! The intent is:
-//! - We initialize a backend once (often expensive).
-//! - We reuse that backend to transcribe multiple inputs.
+//! - Initialize a backend once (often expensive).
+//! - Reuse that backend to transcribe multiple inputs.
 //! - Callers choose output format and behavior via `Opts`.
 //!
 //! This module is deliberately “high level”: it wires up decoding → backend → encoder,
@@ -69,14 +69,14 @@ impl<B: Backend> Scribble<B> {
 
     /// Transcribe an input stream and write the result to an output writer.
     ///
-    /// We accept a generic `Read` input rather than a filename so callers can pass:
+    /// Accepts a generic `Read` input rather than a filename so callers can pass:
     /// - `File`
     /// - stdin
     /// - sockets / HTTP bodies
     /// - any other byte stream
     ///
-    /// We decode audio into a mono 16kHz stream (whisper.cpp’s expected format) using the
-    /// `decoder` module, optionally apply VAD, and then run Whisper and encode segments.
+    /// Decodes audio into a mono 16kHz stream (whisper.cpp’s expected format) using the `decoder`
+    /// module, optionally applies VAD, and then runs the backend and encodes segments.
     ///
     /// Note: The `Send + 'static` bounds mirror the decoder API.
     pub fn transcribe<R, W>(&self, r: R, w: W, opts: &Opts) -> Result<()>
@@ -88,7 +88,7 @@ impl<B: Backend> Scribble<B> {
         let writer = BufWriter::new(w);
 
         // Select an encoder based on the requested output type.
-        // We keep this explicit (no trait objects) to avoid lifetime surprises.
+        // Keep this explicit (no trait objects) to avoid lifetime surprises.
         match opts.output_type {
             OutputType::Json => {
                 let mut encoder = JsonArrayEncoder::new(writer);
@@ -111,8 +111,8 @@ impl<B: Backend> Scribble<B> {
         let backend = &self.backend;
         let vad = Self::get_vad(self.vad_model_path.as_deref(), opts)?;
 
-        // We start decoding on a dedicated thread so we can overlap I/O + decode with backend
-        // inference. The main thread stays responsible for orchestration and error plumbing.
+        // Decode on a dedicated thread to overlap I/O + decode with backend inference.
+        // Keep orchestration and error plumbing on the calling thread.
         let (mut rx, decode_handle) = Self::get_samples_rx(r, opts, vad)?;
 
         let mut stream = backend.create_stream(opts, encoder)?;
@@ -123,10 +123,10 @@ impl<B: Backend> Scribble<B> {
             let _ = stream.on_samples(&chunk)?;
         }
 
-        // We always ask the backend stream to finish so it can flush any buffered segments.
+        // Always call `finish()` so the backend can flush any buffered segments.
         let finish_res = stream.finish();
 
-        // If decode failed, we surface that error (but still prefer a backend/transcription error
+        // If decode failed, surface that error (but still prefer a backend/transcription error
         // if both happened). This keeps failure reporting stable and unsurprising.
         let decode_res: Result<()> = match decode_handle.join() {
             Ok(res) => res,
@@ -154,16 +154,18 @@ impl<B: Backend> Scribble<B> {
             ));
         };
 
-        // We initialize a fresh VAD context per transcription.
+        // Initialize a fresh VAD context per transcription.
         //
         // Rationale:
         // - The upstream `whisper-rs` VAD bindings currently do not mark the VAD context as
         //   `Send`/`Sync`, making it awkward to store inside long-lived, shared server state.
-        // - Even when upstream adds the necessary guarantees, we may want per-request state
+        // - Even when upstream adds the necessary guarantees, per-request state may still be
+        //   useful
         //   (or a pool) to enable true concurrency without a global lock.
         //
-        // If/when the underlying library provides a clearly shareable VAD context, we can revisit
-        // this to reuse or pool VAD processors for lower latency and less per-request overhead.
+        // If/when the underlying library provides a clearly shareable VAD context, this can be
+        // revisited to reuse or pool VAD processors for lower latency and less per-request
+        // overhead.
         Ok(Some(VadProcessor::new(vad_model_path)?))
     }
 
@@ -175,7 +177,7 @@ impl<B: Backend> Scribble<B> {
     where
         R: Read + Send + 'static,
     {
-        // We use a bounded channel to keep memory usage predictable if the backend is slower than
+        // Use a bounded channel to keep memory usage predictable if the backend is slower than
         // decoding. This also makes backpressure explicit rather than relying on unbounded queues.
         let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
         let decode_opts = StreamDecodeOpts::default();
@@ -187,7 +189,7 @@ impl<B: Backend> Scribble<B> {
         });
 
         let rx = if opts.enable_voice_activity_detection {
-            // We wrap the decoder receiver so the main loop can stay unchanged when VAD is enabled.
+            // Wrap the decoder receiver so the main loop stays unchanged when VAD is enabled.
             // `VadStreamReceiver` is responsible for buffering and flushing VAD state.
             let vad = vad.ok_or_else(|| {
                 crate::Error::invalid_input("VAD is enabled, but VAD failed to initialize")

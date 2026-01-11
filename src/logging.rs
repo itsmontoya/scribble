@@ -25,8 +25,8 @@ pub fn init() {
 
 /// Initialize logging when the `logging` feature is not enabled.
 ///
-/// We keep this as a no-op so library consumers can call `scribble::init_logging()` without
-/// needing to pull in `tracing-subscriber`.
+/// This is a no-op so library consumers can call `scribble::init_logging()` without pulling in
+/// `tracing-subscriber`.
 #[cfg(not(feature = "logging"))]
 pub fn init() {}
 

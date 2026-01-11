@@ -332,7 +332,7 @@ Release notes live in `CHANGELOG.md` (and GitHub Releases).
 
 ## Contributing
 
-See [`STYLEGUIDE.md`](STYLEGUIDE.md) for code style and repository conventions.
+See [`STYLEGUIDE.md`](STYLEGUIDE.md) for code style, verification conventions, and repo-level checklists.
 
 ## License
 

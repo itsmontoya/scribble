@@ -9,7 +9,7 @@ use super::token::tokens_from_segment;
 
 /// Our current placeholder language code.
 ///
-/// We prefer `"und"` (“undetermined”) over `"none"` because it’s a common convention
+/// Prefers `"und"` (“undetermined”) over `"none"` because it’s a common convention
 /// in language tagging systems and makes the meaning obvious.
 const DEFAULT_LANGUAGE_CODE: &str = "und";
 
@@ -63,7 +63,7 @@ fn segment_seconds_from_tokens_or_fallback(
             continue;
         }
 
-        // Skip tokens with unknown timestamps (whisper uses -1, which we clamp to 0.0).
+        // Skip tokens with unknown timestamps (whisper uses -1, clamped to 0.0).
         if token.start_seconds <= 0.0 && token.end_seconds <= 0.0 {
             continue;
         }
