@@ -1,9 +1,3 @@
-<!--
-We keep PR descriptions inside a fenced code block.
-Focus on intent/behavior, not a line-by-line diff.
--->
-
-```markdown
 ## Summary
 - 
 
