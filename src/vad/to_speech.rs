@@ -156,22 +156,22 @@ fn scale_samples(buf: &mut [f32], gain: f32) {
 
 /// Convert milliseconds → number of samples at `sample_rate`.
 ///
-/// We round to the nearest sample so padding is stable across rates.
+/// Rounds to the nearest sample so padding is stable across rates.
 fn ms_to_samples(ms: u32, sample_rate: f32) -> usize {
     ((ms as f32 / 1000.0) * sample_rate).round() as usize
 }
 
 /// Convert the i'th VAD segment into `(start_idx, end_idx)` sample indices.
 ///
-/// whisper_rs VAD timestamps are in centiseconds (10ms units), so we convert:
+/// whisper_rs VAD timestamps are in centiseconds (10ms units); converts:
 /// - centiseconds → seconds
 /// - seconds → samples
 ///
 /// Index rounding policy:
-/// - We `floor()` the start index so we include the first speech sample.
-/// - We `ceil()` the end index so we include the last speech sample.
+/// - Floors the start index to include the first speech sample.
+/// - Ceils the end index to include the last speech sample.
 ///
-/// We clamp indices into `[0 .. samples_len]` so slicing is always safe.
+/// Clamps indices into `[0 .. samples_len]` so slicing is always safe.
 fn segment_sample_indexes(
     segments: &WhisperVadSegments,
     i: i32,
@@ -199,7 +199,7 @@ fn segment_sample_indexes(
     start_idx = start_idx.min(samples_len);
     end_idx = end_idx.min(samples_len);
 
-    // Be defensive: ensure we never produce an inverted range.
+    // Be defensive: ensure an inverted range is never produced.
     if end_idx < start_idx {
         end_idx = start_idx;
     }

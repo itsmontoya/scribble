@@ -16,10 +16,10 @@ use crate::segment_encoder::SegmentEncoder;
 
 use super::segments::{run_whisper_full, to_segment};
 
-/// Maximum buffer size before we force progress.
+/// Maximum buffer size before forcing progress.
 ///
-/// If Whisper keeps returning <= 1 segment, we keep accumulating audio until this cap and then
-/// emit whatever we have to avoid unbounded memory growth.
+/// If Whisper keeps returning <= 1 segment, keeps accumulating audio until this cap and then emits
+/// whatever is available to avoid unbounded memory growth.
 const DEFAULT_MAX_BUFFER_SECONDS: usize = 30;
 
 /// Max exponential backoff when Whisper makes no progress (in multiples of `min_window_samples`).
@@ -36,12 +36,12 @@ pub(crate) struct BufferedSegmentTranscriber<'a> {
     next_infer_at_samples: usize,
     no_progress_runs: u32,
 
-    // Backing buffer for decoded samples. We keep an index (`head`) instead of draining on every
-    // segment so advancing is cheap; we occasionally compact to keep memory usage reasonable.
+    // Backing buffer for decoded samples. Uses an index (`head`) instead of draining on every
+    // segment so advancing is cheap; occasionally compacts to keep memory usage reasonable.
     samples: Vec<f32>,
     head: usize,
 
-    // Total number of samples we have advanced past since the beginning of the stream.
+    // Total number of samples advanced past since the beginning of the stream.
     advanced_samples: usize,
 }
 
@@ -89,7 +89,7 @@ impl<'a> BufferedSegmentTranscriber<'a> {
         }
 
         // Compact when either:
-        // - we’ve consumed at least 1s of audio, or
+        // - at least 1s of audio has been consumed, or
         // - the head is past half the buffer
         let should_compact =
             self.head >= TARGET_SAMPLE_RATE as usize || self.head >= self.samples.len() / 2;
@@ -135,8 +135,8 @@ impl<'a> BufferedSegmentTranscriber<'a> {
             .context("whisper returned a negative segment count")?;
 
         // Finalization rule:
-        // - If Whisper produced >= 2 segments, we treat all but the last as “final”.
-        // - At end-of-stream (or max-buffer cap), we flush everything we have.
+        // - If Whisper produced >= 2 segments, treat all but the last as “final”.
+        // - At end-of-stream (or max-buffer cap), flush everything available.
         let emit_count = if force_flush {
             n_segments
         } else if n_segments >= 2 {
@@ -190,7 +190,7 @@ impl<'a> BufferedSegmentTranscriber<'a> {
         self.no_progress_runs = 0;
 
         // After emitting (and advancing), wait for more audio before running Whisper again,
-        // unless we are flushing (finish() will call us again until no progress).
+        // unless flushing (finish() will call this again until no progress).
         if !force_flush {
             self.next_infer_at_samples = self.window_len() + self.min_window_samples;
         } else {
@@ -224,7 +224,7 @@ fn next_infer_threshold(
     let shift = no_progress_runs.saturating_sub(1).min(MAX_BACKOFF_SHIFT);
     let step = min_window_samples.saturating_mul(1usize << shift);
     let proposed = current_len.saturating_add(step);
-    // Don't schedule beyond our forced flush boundary; if we get there, we'll force_flush.
+    // Don't schedule beyond the forced flush boundary; once reached, `force_flush` handles it.
     proposed.min(max_window_samples)
 }
 

@@ -68,8 +68,9 @@ pub fn decode_to_stream_from_read<R>(
 where
     R: Read + Send + 'static,
 {
-    // Symphonia's `MediaSource` is `Read + Send + Sync`. We only need to *move* the reader to the
-    // decode thread (not share it concurrently), so we wrap it in a mutex to satisfy `Sync`.
+    // Symphonia's `MediaSource` is `Read + Send + Sync`. This only needs to *move* the reader to
+    // the decode thread (not share it concurrently), so it is wrapped in a mutex to satisfy
+    // `Sync`.
     let source = ReadOnlySource::new(LockedRead::new(reader));
     decode_impl(Box::new(source), opts, sink)
 }
@@ -99,7 +100,7 @@ fn decode_impl(
         // Decode packet → normalized audio pipeline → emit chunks.
         //
         // `decode_packet_and_then` returns `Ok(false)` for recoverable cases
-        // (e.g. bad frames / IO end). We keep iterating.
+        // (e.g. bad frames / IO end). Keep iterating.
         decode_packet_and_then(&mut decoder, &packet, |decoded| {
             pipeline
                 .push_decoded_and_emit(&decoded, opts.target_chunk_frames, |chunk| {
@@ -172,8 +173,8 @@ mod tests {
             _marker: Cell::new(0),
         };
 
-        // We expect probing to fail on empty input; the point of this test is that it compiles and
-        // runs without requiring `R: Sync`.
+        // Probing should fail on empty input; the point is that it compiles and runs without
+        // requiring `R: Sync`.
         let res = decode_to_stream_from_read(reader, StreamDecodeOpts::default(), &mut NoopSink);
         assert!(res.is_err());
     }

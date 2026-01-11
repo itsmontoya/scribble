@@ -125,7 +125,7 @@ impl AudioPipeline {
             return Ok(());
         }
 
-        // How many source frames we feed rubato per `process()` call.
+        // How many source frames are fed to rubato per `process()` call.
         // Tradeoff: larger chunks = better throughput; smaller chunks = lower latency.
         let in_chunk_src_frames = 2048;
 
@@ -362,7 +362,7 @@ mod tests {
             Ok(true)
         })?;
 
-        // We expect the remainder to be smaller than one full rubato input block.
+        // Expect the remainder to be smaller than one full rubato input block.
         assert!(pipeline.mono_src_acc.len() < in_max);
 
         pipeline.finalize(256, |chunk| {

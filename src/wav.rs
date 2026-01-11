@@ -6,7 +6,7 @@ use crate::audio_pipeline::TARGET_SAMPLE_RATE;
 
 /// Load WAV audio from a reader and return normalized audio samples.
 ///
-/// What we return:
+/// Returns:
 /// - A `Vec<f32>` containing mono audio samples normalized to `[-1.0, 1.0]`
 /// - The associated `WavSpec` so callers still have access to metadata
 ///
@@ -14,7 +14,7 @@ use crate::audio_pipeline::TARGET_SAMPLE_RATE;
 /// - Mono (1 channel)
 /// - Scribble's target sample rate
 ///
-/// Why we enforce this:
+/// Rationale:
 /// - enforcing constraints here keeps downstream transcription simple and predictable
 #[cfg(test)]
 pub(crate) fn get_samples_from_wav_reader<R>(reader: R) -> Result<(Vec<f32>, WavSpec)>
@@ -25,7 +25,7 @@ where
     let mut reader = WavReader::new(reader).context("failed to read WAV data from reader")?;
     let spec = reader.spec();
 
-    // We require mono audio.
+    // Require mono audio.
     if spec.channels != 1 {
         anyhow::bail!(
             "expected mono WAV (1 channel), got {} channels",
@@ -33,7 +33,7 @@ where
         );
     }
 
-    // We require the target sample rate.
+    // Require the target sample rate.
     if spec.sample_rate != TARGET_SAMPLE_RATE {
         anyhow::bail!(
             "expected {} Hz sample rate, got {} Hz",
