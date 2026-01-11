@@ -124,6 +124,35 @@ cargo run --features bin-scribble-cli --bin scribble-cli -- \
 
 Output is written to `stdout` in WebVTT format by default.
 
+### Stream a live URL into `scribble-cli` (via `ffmpeg`)
+
+If you have a live audio stream URL (MP3/AAC/etc.), you can decode it to Whisper-friendly WAV and pipe it into `scribble-cli` via stdin:
+
+```bash
+ffmpeg -re -loglevel error -nostats \
+  -i "https://stream.example.com/live.mp3?session-id=REDACTED" \
+  -f wav -ac 1 -ar 16000 - \
+| scribble-cli \
+    --model ./models/ggml-tiny.bin \
+    --vad-model ./models/ggml-silero-v6.2.0.bin \
+    --enable-vad \
+    --input -
+```
+
+### Stream a Twitch channel into `scribble-cli` (via `streamlink` + `ffmpeg`)
+
+If you have `streamlink` installed, you can pull a Twitch stream to stdout and feed it through `ffmpeg`:
+
+```bash
+streamlink --stdout https://www.twitch.tv/dougdoug best \
+| ffmpeg -hide_banner -loglevel error -i pipe:0 -vn -ac 1 -ar 16000 -f wav pipe:1 \
+| scribble-cli \
+    --model ./models/ggml-tiny.bin \
+    --vad-model ./models/ggml-silero-v6.2.0.bin \
+    --enable-vad \
+    --input -
+```
+
 ## scribble-server
 
 `scribble-server` is a long-running HTTP server that loads models once and accepts transcription requests over HTTP.
