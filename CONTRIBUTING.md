@@ -26,4 +26,3 @@ See `STYLEGUIDE.md` for:
 ## Questions
 
 If you’re unsure about an API or design direction, open an issue first so we can align before you implement a larger change.
-

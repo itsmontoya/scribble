@@ -63,17 +63,4 @@ When making code changes, we run the following before considering a change compl
 
 We treat formatting and clippy warnings as part of the API contract, not optional hygiene.
 
-## Pull requests
-
-When creating pull requests:
-- We write the PR description inside a fenced code block using Markdown.
-- The description focuses on intent and behavior, not a line-by-line diff.
-- We explicitly call out behavior changes, edge cases, and follow-up work.
-
-## Before finishing a change, we quickly check:
-
-- Did we preserve behavior (or clearly document the behavior change)?
-- Are errors contextual at the boundary?
-- Are “we” statements used for intent in docs and comments?
-- Is the control flow understandable to a new contributor in ~60 seconds?
-- Did we run `cargo fmt` and `cargo clippy` with the project’s standard flags?
+For PR expectations and repo-level checklists, see `AGENTS.md`.
