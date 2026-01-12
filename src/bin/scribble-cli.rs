@@ -32,6 +32,7 @@ fn run() -> Result<()> {
         language: params.language.clone(),
         output_type: params.output_type,
         incremental_min_window_seconds: 1,
+            emit_single_segments: false,
     };
 
     // Open an input source.
