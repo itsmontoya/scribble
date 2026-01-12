@@ -214,6 +214,7 @@ async fn transcribe(
         language: query.language,
         output_type,
         incremental_min_window_seconds: 1,
+        emit_single_segments: false,
     };
 
     let content_type = match opts.output_type {

@@ -292,6 +292,7 @@ mod tests {
             language: None,
             output_type,
             incremental_min_window_seconds: 1,
+            emit_single_segments: false,
         }
     }
 
