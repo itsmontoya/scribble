@@ -92,6 +92,13 @@ bin-scribble-server = [
   "dep:tower-http",
 ]
 
+# GPU acceleration features (pass-through to whisper-rs).
+cuda = ["whisper-rs/cuda"]
+metal = ["whisper-rs/metal"]
+hipblas = ["whisper-rs/hipblas"]
+vulkan = ["whisper-rs/vulkan"]
+coreml = ["whisper-rs/coreml"]
+
 [[bin]]
 name = "scribble-cli"
 path = "src/bin/scribble-cli.rs"
