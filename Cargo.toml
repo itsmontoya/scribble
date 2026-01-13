@@ -106,3 +106,12 @@ required-features = ["bin-model-downloader"]
 name = "scribble-server"
 path = "src/bin/scribble-server/main.rs"
 required-features = ["bin-scribble-server"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+
+[profile.release-quick]
+inherits = "release"
+codegen-units = 16
+lto = false
