@@ -275,7 +275,8 @@ impl WhisperBackend {
         let ctx = self.selected_context(opts)?;
 
         let vad = if opts.enable_voice_activity_detection {
-            let vad_processor = VadProcessor::new(&self.vad_model_path)?;
+            let policy = opts.vad_policy.unwrap_or_default();
+            let vad_processor = VadProcessor::with_policy(&self.vad_model_path, policy)?;
             Some(VadStream::new(vad_processor))
         } else {
             None
