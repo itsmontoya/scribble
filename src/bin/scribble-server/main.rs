@@ -215,6 +215,7 @@ async fn transcribe(
         output_type,
         incremental_min_window_seconds: 1,
         emit_single_segments: false,
+        vad_policy: None,
     };
 
     let content_type = match opts.output_type {

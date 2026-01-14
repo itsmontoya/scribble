@@ -33,6 +33,7 @@ fn run() -> Result<()> {
         output_type: params.output_type,
         incremental_min_window_seconds: 1,
         emit_single_segments: false,
+        vad_policy: None,
     };
 
     // Open an input source.
