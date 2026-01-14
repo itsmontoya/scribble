@@ -62,8 +62,10 @@ impl VadStream {
             return Ok(());
         }
 
-        let _ = self.vad.apply(&mut window)?;
-        self.out_buf.extend_from_slice(&window);
+        let has_speech = self.vad.apply(&mut window)?;
+        if has_speech {
+            self.out_buf.extend_from_slice(&window);
+        }
         Ok(())
     }
 
@@ -109,7 +111,14 @@ impl VadStream {
             window.extend_from_slice(&self.pending_tail);
             window.extend_from_slice(&segment);
 
-            let _ = self.vad.apply(&mut window)?;
+            let has_speech = self.vad.apply(&mut window)?;
+
+            if !has_speech {
+                // No speech detected in this window - drop it entirely to prevent
+                // Whisper from hallucinating text from silence.
+                self.pending_tail.clear();
+                continue;
+            }
 
             if self.holdback_frames > 0 && window.len() > self.holdback_frames {
                 let split = window.len() - self.holdback_frames;
