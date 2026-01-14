@@ -23,7 +23,8 @@ pub struct VadStream {
 }
 
 impl VadStream {
-    pub(crate) fn new(vad: VadProcessor) -> Self {
+    /// Create a new VAD stream adapter.
+    pub fn new(vad: VadProcessor) -> Self {
         const SAMPLE_RATE_HZ: f32 = 16_000.0;
 
         let policy = vad.policy();
@@ -43,12 +44,14 @@ impl VadStream {
         }
     }
 
-    pub(crate) fn push(&mut self, chunk: &[f32]) -> Result<()> {
+    /// Push a chunk of audio samples into the VAD stream.
+    pub fn push(&mut self, chunk: &[f32]) -> Result<()> {
         self.in_buf.extend_from_slice(chunk);
         self.process_ready_windows()
     }
 
-    pub(crate) fn flush(&mut self) -> Result<()> {
+    /// Flush any remaining buffered audio through VAD.
+    pub fn flush(&mut self) -> Result<()> {
         self.process_ready_windows()?;
 
         let mut window = Vec::with_capacity(self.pending_tail.len() + self.in_buf.len());
@@ -69,7 +72,8 @@ impl VadStream {
         Ok(())
     }
 
-    pub(crate) fn peek_chunk(&self, frames: usize) -> Option<&[f32]> {
+    /// Peek at the next chunk of VAD-filtered output without consuming it.
+    pub fn peek_chunk(&self, frames: usize) -> Option<&[f32]> {
         let available = self.out_buf.len().saturating_sub(self.out_cursor);
         if available >= frames {
             Some(&self.out_buf[self.out_cursor..self.out_cursor + frames])
@@ -78,7 +82,8 @@ impl VadStream {
         }
     }
 
-    pub(crate) fn consume_chunk(&mut self, frames: usize) {
+    /// Consume a chunk of VAD-filtered output.
+    pub fn consume_chunk(&mut self, frames: usize) {
         self.out_cursor = (self.out_cursor + frames).min(self.out_buf.len());
 
         // Periodically compact to avoid unbounded growth if the caller consumes in small steps.
@@ -89,7 +94,8 @@ impl VadStream {
         }
     }
 
-    pub(crate) fn peek_remainder(&self) -> Option<&[f32]> {
+    /// Peek at any remaining VAD-filtered output.
+    pub fn peek_remainder(&self) -> Option<&[f32]> {
         if self.out_cursor < self.out_buf.len() {
             Some(&self.out_buf[self.out_cursor..])
         } else {
@@ -97,7 +103,8 @@ impl VadStream {
         }
     }
 
-    pub(crate) fn consume_remainder(&mut self) {
+    /// Consume all remaining VAD-filtered output.
+    pub fn consume_remainder(&mut self) {
         self.out_cursor = self.out_buf.len();
         self.out_buf.clear();
         self.out_cursor = 0;
