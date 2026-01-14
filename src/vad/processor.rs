@@ -21,6 +21,13 @@ impl VadProcessor {
         })
     }
 
+    /// Create a new VAD processor with a custom policy.
+    pub fn with_policy(model_path: &str, policy: VadPolicy) -> Result<Self> {
+        let params = WhisperVadContextParams::default();
+        let ctx = WhisperVadContext::new(model_path, params)?;
+        Ok(Self { ctx, policy })
+    }
+
     pub(crate) fn policy(&self) -> VadPolicy {
         self.policy
     }
