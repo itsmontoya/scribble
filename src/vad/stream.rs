@@ -20,6 +20,7 @@ pub struct VadStream {
     in_buf: Vec<f32>,
     out_buf: Vec<f32>,
     out_cursor: usize,
+    last_speech_instant: Option<std::time::Instant>,
 }
 
 impl VadStream {
@@ -41,6 +42,7 @@ impl VadStream {
             in_buf: Vec::new(),
             out_buf: Vec::new(),
             out_cursor: 0,
+            last_speech_instant: None,
         }
     }
 
@@ -67,6 +69,7 @@ impl VadStream {
 
         let has_speech = self.vad.apply(&mut window)?;
         if has_speech {
+            self.last_speech_instant = Some(std::time::Instant::now());
             self.out_buf.extend_from_slice(&window);
         }
         Ok(())
@@ -110,6 +113,15 @@ impl VadStream {
         self.out_cursor = 0;
     }
 
+    /// Returns the instant when VAD last detected speech, if any.
+    ///
+    /// This is updated each time a VAD window contains speech. Callers can use
+    /// this to measure silence duration based on actual voice activity, not
+    /// segment emission timing.
+    pub fn last_speech_instant(&self) -> Option<std::time::Instant> {
+        self.last_speech_instant
+    }
+
     fn process_ready_windows(&mut self) -> Result<()> {
         while self.in_buf.len() >= self.window_frames {
             let segment: Vec<f32> = self.in_buf.drain(..self.window_frames).collect();
@@ -119,6 +131,10 @@ impl VadStream {
             window.extend_from_slice(&segment);
 
             let has_speech = self.vad.apply(&mut window)?;
+
+            if has_speech {
+                self.last_speech_instant = Some(std::time::Instant::now());
+            }
 
             if !has_speech {
                 // No speech detected in this window - drop it entirely to prevent
@@ -210,4 +226,26 @@ impl VadStreamReceiver {
 
 fn ms_to_samples(ms: u32, sample_rate: f32) -> usize {
     ((ms as f32 / 1000.0) * sample_rate).round() as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Compile-time verification that `last_speech_instant()` accessor exists with expected signature.
+    ///
+    /// A proper unit test would verify that `last_speech_instant()` returns `None` initially
+    /// and `Some(Instant)` after speech is detected. However, `VadStream::new()` requires a
+    /// `VadProcessor`, which in turn requires a valid whisper VAD model file to construct.
+    /// This makes isolated unit testing impractical without either:
+    /// - Mocking infrastructure (not currently in place)
+    /// - A test fixture model file (adds CI/repo complexity)
+    ///
+    /// This compile-time check ensures the method signature remains stable. Integration tests
+    /// in the broader transcription pipeline exercise the runtime behavior.
+    #[allow(dead_code)]
+    fn assert_last_speech_instant_signature() {
+        fn check<T: Fn(&VadStream) -> Option<std::time::Instant>>(_: T) {}
+        check(VadStream::last_speech_instant);
+    }
 }
