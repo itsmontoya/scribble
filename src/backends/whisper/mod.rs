@@ -71,6 +71,10 @@ impl BackendStream for WhisperStream<'_> {
         }
         self.inner.finish().map_err(Into::into)
     }
+
+    fn last_vad_speech_instant(&self) -> Option<std::time::Instant> {
+        self.vad.as_ref().and_then(|v| v.last_speech_instant())
+    }
 }
 
 impl WhisperBackend {
