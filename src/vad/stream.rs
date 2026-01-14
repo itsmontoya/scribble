@@ -36,7 +36,11 @@ impl VadStream {
 
         Self {
             vad,
-            window_frames: (SAMPLE_RATE_HZ as usize) * 2,
+            // Use 500ms windows (8000 samples at 16kHz) for responsive speech detection.
+            // Smaller windows mean `last_speech_instant()` updates more frequently during
+            // continuous speech, enabling accurate silence gap measurement downstream.
+            // Silero VAD works reliably with windows down to ~250ms.
+            window_frames: (SAMPLE_RATE_HZ as usize) / 2,
             holdback_frames: ms_to_samples(holdback_ms, SAMPLE_RATE_HZ),
             pending_tail: Vec::new(),
             in_buf: Vec::new(),
