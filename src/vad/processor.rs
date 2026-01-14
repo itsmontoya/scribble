@@ -1,7 +1,7 @@
 use anyhow::Result;
 use whisper_rs::{WhisperVadContext, WhisperVadContextParams};
 
-use super::to_speech::{DEFAULT_VAD_POLICY, VadPolicy, to_speech_only_with_policy};
+use super::to_speech::{VadPolicy, to_speech_only_with_policy};
 
 /// Voice Activity Detection (VAD) processor.
 ///
@@ -17,7 +17,7 @@ impl VadProcessor {
         let ctx = WhisperVadContext::new(model_path, params)?;
         Ok(Self {
             ctx,
-            policy: DEFAULT_VAD_POLICY,
+            policy: VadPolicy::default(),
         })
     }
 
