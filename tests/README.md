@@ -5,7 +5,7 @@ This directory contains integration tests that exercise Scribble end-to-end (dec
 ## Running
 
 ```bash
-cargo test --all-features
+./scripts/test-all.sh
 ```
 
 ## Local assets
@@ -24,4 +24,3 @@ Some tests require local model files and fixtures that are not downloaded automa
 ## Fixture provenance
 
 See `tests/fixtures/README.md`.
-

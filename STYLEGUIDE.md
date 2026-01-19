@@ -59,9 +59,9 @@ Testing expectations:
 When making code changes, we run the following before considering a change complete:
 
 - `cargo fmt --all -- --check`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo check --all-features`
-- `cargo test --all-features`
+- `cargo clippy --all-targets --features bin-scribble-cli,bin-model-downloader,bin-scribble-server -- -D warnings`
+- `cargo check --features bin-scribble-cli,bin-model-downloader,bin-scribble-server`
+- `./scripts/test-all.sh`
 
 We treat formatting and clippy warnings as part of the API contract, not optional hygiene.
 
