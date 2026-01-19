@@ -14,6 +14,8 @@ jobs:
   rust-ci:
     name: fmt / clippy / test / docs
     runs-on: ubuntu-latest
+    env:
+      ALL_FEATURES: bin-scribble-cli,bin-model-downloader,bin-scribble-server
 
     steps:
       - name: Checkout
@@ -31,15 +33,15 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (deny warnings)
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --features "$ALL_FEATURES" -- -D warnings
 
       - name: Tests
-        run: cargo test --locked --all-features
+        run: cargo test --locked --features "$ALL_FEATURES"
 
       - name: Docs (no warnings as errors)
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked --no-deps --all-features
+        run: cargo doc --locked --no-deps --features "$ALL_FEATURES"
 
       - name: Publish (dry-run)
         if: >

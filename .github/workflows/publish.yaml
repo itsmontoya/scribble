@@ -91,6 +91,8 @@ jobs:
     name: Build binaries (linux)
     needs: tag_and_release
     runs-on: ubuntu-latest
+    env:
+      ALL_FEATURES: bin-scribble-cli,bin-model-downloader,bin-scribble-server
 
     steps:
       - name: Checkout tag
@@ -105,7 +107,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build all bins
-        run: cargo build --locked --release --all-features --bins
+        run: cargo build --locked --release --features "$ALL_FEATURES" --bins
 
       - name: Collect binaries
         shell: bash
