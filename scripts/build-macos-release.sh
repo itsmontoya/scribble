@@ -28,6 +28,7 @@ ARCH_LABEL="arm64"
 NO_UPLOAD="false"
 CLEAN="false"
 BINS=()
+ALL_FEATURES="bin-scribble-cli,bin-model-downloader,bin-scribble-server"
 
 usage() {
   sed -n '1,120p' "$0" | sed 's/^# \{0,1\}//'
@@ -138,12 +139,12 @@ esac
 echo "==> Building release binaries"
 if [ "${#BINS[@]}" -gt 0 ]; then
   for b in "${BINS[@]}"; do
-    echo "    - cargo build --release --all-features --bin $b --target $TARGET"
-    cargo build --release --all-features --bin "$b" --target "$TARGET"
+    echo "    - cargo build --release --features $ALL_FEATURES --bin $b --target $TARGET"
+    cargo build --release --features "$ALL_FEATURES" --bin "$b" --target "$TARGET"
   done
 else
-  echo "    - cargo build --release --all-features --bins --target $TARGET"
-  cargo build --release --all-features --bins --target "$TARGET"
+  echo "    - cargo build --release --features $ALL_FEATURES --bins --target $TARGET"
+  cargo build --release --features "$ALL_FEATURES" --bins --target "$TARGET"
 fi
 
 DIST_DIR="$REPO_ROOT/dist-macos"
