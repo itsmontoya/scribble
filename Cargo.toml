@@ -30,7 +30,7 @@ keywords = ["whisper", "transcription", "speech-to-text"]
 categories = ["multimedia::audio"]
 
 [package.metadata.docs.rs]
-all-features = true
+features = ["bin-scribble-cli", "bin-model-downloader", "bin-scribble-server"]
 
 [dependencies]
 anyhow = "1"
