@@ -7,8 +7,8 @@ Thanks for your interest in contributing to Scribble.
 - Install Rust (this repo pins the toolchain via `rust-toolchain.toml`).
 - Run checks before opening a PR:
   - `cargo fmt --all -- --check`
-  - `cargo clippy --all-targets --all-features -- -D warnings`
-  - `cargo test --all-features`
+  - `cargo clippy --all-targets --features bin-scribble-cli,bin-model-downloader,bin-scribble-server -- -D warnings`
+  - `./scripts/test-all.sh`
 
 ## Style and conventions
 

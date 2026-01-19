@@ -41,7 +41,7 @@ Scribble targets Rust **stable** (tracked via `rust-toolchain.toml`).
 Clone the repository and build the binaries:
 
 ```bash
-cargo build --release --all-features
+./scripts/build-all.sh
 ```
 
 Or build a single binary to a target directory:
@@ -318,10 +318,10 @@ Run coverage locally:
 
 ```bash
 # Print a summary to stdout
-cargo llvm-cov --all-features --all-targets
+cargo llvm-cov --features bin-scribble-cli,bin-model-downloader,bin-scribble-server --all-targets
 
 # Generate an HTML report (writes to ./target/llvm-cov/html)
-cargo llvm-cov --all-features --all-targets --html
+cargo llvm-cov --features bin-scribble-cli,bin-model-downloader,bin-scribble-server --all-targets --html
 ```
 
 ## Status

@@ -11,6 +11,8 @@ concurrency:
 jobs:
   coverage:
     runs-on: ubuntu-latest
+    env:
+      ALL_FEATURES: bin-scribble-cli,bin-model-downloader,bin-scribble-server
 
     steps:
       - name: Checkout
@@ -28,7 +30,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Generate LCOV report
-        run: cargo llvm-cov --all-features --all-targets --lcov --output-path lcov.info
+        run: cargo llvm-cov --features "$ALL_FEATURES" --all-targets --lcov --output-path lcov.info
 
       - name: Coverage summary
         shell: bash
