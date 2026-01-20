@@ -56,6 +56,34 @@ This will produce the following binaries:
 - `scribble-server` — HTTP server for transcription
 - `model-downloader` — download Whisper and VAD models
 
+## GPU acceleration (feature flags)
+
+Scribble exposes whisper-rs GPU backend features as Cargo features. Enable the
+backend you want in `Cargo.toml` or via `--features`:
+
+```toml
+[dependencies]
+scribble = { version = "0.5", features = ["cuda"] }
+```
+
+```bash
+cargo run --features "bin-scribble-cli,cuda" --bin scribble-cli -- \
+  --model ./models/ggml-large-v3-turbo.bin \
+  --input ./input.wav
+```
+
+Available GPU feature flags:
+
+- `cuda` (NVIDIA CUDA)
+- `metal` (Apple Metal)
+- `hipblas` (AMD ROCm)
+- `vulkan` (Vulkan)
+- `coreml` (Apple CoreML)
+
+These are passthrough features; you still need the corresponding system
+dependencies installed for your platform. See the whisper-rs documentation for
+backend setup details.
+
 ## model-downloader
 
 `model-downloader` is a small helper CLI for downloading **known-good Whisper and Whisper-VAD models** into a local directory.
