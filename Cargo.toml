@@ -47,6 +47,7 @@ tokio = { version = "1", optional = true, features = [
   "io-util",
   "net",
   "sync",
+  "signal",
 ] }
 tokio-util = { version = "0.7", optional = true, features = ["io", "io-util"] }
 futures-util = { version = "0.3", optional = true }
@@ -62,7 +63,7 @@ rubato = "1.0.0"
 symphonia = { version = "0.5", features = ["all"] }
 tempfile = "3"
 prometheus = { version = "0.14", optional = true }
-tower-http = { version = "0.6", optional = true, features = ["trace"] }
+tower-http = { version = "0.6", optional = true, features = ["trace", "timeout"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", optional = true, features = [
   "env-filter",

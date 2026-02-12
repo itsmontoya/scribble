@@ -1,7 +1,3 @@
-use std::io::Cursor;
-use std::net::SocketAddr;
-use std::sync::Arc;
-
 use anyhow::{Context, Result, anyhow};
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Query, State};
@@ -14,10 +10,16 @@ use clap::Parser;
 use futures_util::stream::BoxStream;
 use futures_util::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
+use std::io::Cursor;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 use symphonia::core::io::ReadOnlySource;
 use tokio::net::TcpListener;
+use tokio::signal;
 use tokio::sync::oneshot;
 use tokio_util::io::{ReaderStream, SyncIoBridge};
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnResponse, TraceLayer};
 use tracing::{Level, error, info, warn};
 
@@ -159,11 +161,20 @@ async fn run() -> Result<()> {
                 )
                 .on_response(DefaultOnResponse::new().level(Level::INFO))
                 .on_failure(DefaultOnFailure::new().level(Level::ERROR)),
-        );
+        )
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(10),
+        ));
 
     let listener = TcpListener::bind(addr).await.context("bind failed")?;
+
     info!(%addr, "listening");
-    axum::serve(listener, app).await.context("server error")?;
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("server error")?;
 
     Ok(())
 }
@@ -355,6 +366,30 @@ fn parse_output_type(output: Option<&str>) -> Result<OutputType> {
                 "unknown output type '{other}' (expected 'json' or 'vtt')"
             )),
         },
+    }
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
 }
 
