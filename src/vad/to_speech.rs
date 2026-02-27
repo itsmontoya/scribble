@@ -232,15 +232,19 @@ pub struct VadPolicy {
     pub non_speech_gain: f32,
 }
 
-/// Default policy tuned for "keep speech, drop/attenuate silence".
-pub const DEFAULT_VAD_POLICY: VadPolicy = VadPolicy {
-    threshold: 0.5,
-    pre_pad_ms: 250,
-    post_pad_ms: 250,
-    min_speech_ms: 250,
-    gap_merge_ms: 300,
-    non_speech_gain: 0.0,
-};
+impl Default for VadPolicy {
+    /// Default policy tuned for "keep speech, drop/attenuate silence".
+    fn default() -> Self {
+        Self {
+            threshold: 0.5,
+            pre_pad_ms: 250,
+            post_pad_ms: 250,
+            min_speech_ms: 250,
+            gap_merge_ms: 300,
+            non_speech_gain: 0.0,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

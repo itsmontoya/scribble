@@ -135,12 +135,15 @@ impl<'a> BufferedSegmentTranscriber<'a> {
             .context("whisper returned a negative segment count")?;
 
         // Finalization rule:
-        // - If Whisper produced >= 2 segments, treat all but the last as “final”.
+        // - If Whisper produced >= 2 segments, treat all but the last as "final".
         // - At end-of-stream (or max-buffer cap), flush everything available.
+        // - If emit_single_segments is enabled, also emit when there's exactly 1 segment.
         let emit_count = if force_flush {
             n_segments
         } else if n_segments >= 2 {
             n_segments - 1
+        } else if n_segments == 1 && self.opts.emit_single_segments {
+            1
         } else {
             0
         };

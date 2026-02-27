@@ -21,9 +21,7 @@ use crate::decoder::{SamplesSink, StreamDecodeOpts, decode_to_stream_from_read};
 use crate::json_array_encoder::JsonArrayEncoder;
 use crate::opts::Opts;
 use crate::output_type::OutputType;
-use crate::samples_rx::SamplesRx;
 use crate::segment_encoder::SegmentEncoder;
-use crate::vad::{VadProcessor, VadStreamReceiver};
 use crate::vtt_encoder::VttEncoder;
 
 /// The main high-level transcription entry point.
@@ -36,7 +34,6 @@ use crate::vtt_encoder::VttEncoder;
 /// - Call `transcribe` many times with different inputs and outputs.
 pub struct Scribble<B: Backend> {
     backend: B,
-    vad_model_path: Option<String>,
 }
 
 impl Scribble<WhisperBackend> {
@@ -49,22 +46,15 @@ impl Scribble<WhisperBackend> {
         I: IntoIterator<Item = P>,
         P: AsRef<str>,
     {
-        let vad_model_path = vad_model_path.as_ref();
-        let backend = WhisperBackend::new(model_paths, vad_model_path)?;
-        Ok(Self {
-            backend,
-            vad_model_path: Some(vad_model_path.to_owned()),
-        })
+        let backend = WhisperBackend::new(model_paths, vad_model_path.as_ref())?;
+        Ok(Self { backend })
     }
 }
 
 impl<B: Backend> Scribble<B> {
     /// Create a new `Scribble` instance using a custom backend.
     pub fn with_backend(backend: B) -> Self {
-        Self {
-            backend,
-            vad_model_path: None,
-        }
+        Self { backend }
     }
 
     /// Transcribe an input stream and write the result to an output writer.
@@ -109,11 +99,11 @@ impl<B: Backend> Scribble<B> {
         E: SegmentEncoder,
     {
         let backend = &self.backend;
-        let vad = Self::get_vad(self.vad_model_path.as_deref(), opts)?;
 
         // Decode on a dedicated thread to overlap I/O + decode with backend inference.
         // Keep orchestration and error plumbing on the calling thread.
-        let (mut rx, decode_handle) = Self::get_samples_rx(r, opts, vad)?;
+        // Note: VAD filtering is now handled inside the backend stream when enabled.
+        let (rx, decode_handle) = Self::get_samples_rx(r)?;
 
         let mut stream = backend.create_stream(opts, encoder)?;
 
@@ -143,37 +133,13 @@ impl<B: Backend> Scribble<B> {
         }
     }
 
-    fn get_vad(vad_model_path: Option<&str>, opts: &Opts) -> Result<Option<VadProcessor>> {
-        if !opts.enable_voice_activity_detection {
-            return Ok(None);
-        }
-
-        let Some(vad_model_path) = vad_model_path else {
-            return Err(crate::Error::invalid_input(
-                "VAD is enabled, but no VAD model path is configured for this Scribble instance",
-            ));
-        };
-
-        // Initialize a fresh VAD context per transcription.
-        //
-        // Rationale:
-        // - The upstream `whisper-rs` VAD bindings currently do not mark the VAD context as
-        //   `Send`/`Sync`, making it awkward to store inside long-lived, shared server state.
-        // - Even when upstream adds the necessary guarantees, per-request state may still be
-        //   useful
-        //   (or a pool) to enable true concurrency without a global lock.
-        //
-        // If/when the underlying library provides a clearly shareable VAD context, this can be
-        // revisited to reuse or pool VAD processors for lower latency and less per-request
-        // overhead.
-        Ok(Some(VadProcessor::new(vad_model_path)?))
-    }
-
+    #[allow(clippy::type_complexity)]
     fn get_samples_rx<R>(
         r: R,
-        opts: &Opts,
-        vad: Option<VadProcessor>,
-    ) -> Result<(SamplesRx, std::thread::JoinHandle<Result<()>>)>
+    ) -> Result<(
+        mpsc::Receiver<Vec<f32>>,
+        std::thread::JoinHandle<Result<()>>,
+    )>
     where
         R: Read + Send + 'static,
     {
@@ -181,25 +147,14 @@ impl<B: Backend> Scribble<B> {
         // decoding. This also makes backpressure explicit rather than relying on unbounded queues.
         let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(512);
         let decode_opts = StreamDecodeOpts::default();
-        let emit_frames = decode_opts.target_chunk_frames;
 
         let decode_handle = std::thread::spawn(move || -> Result<()> {
             let mut sink = ChannelSamplesSink { tx };
             decode_to_stream_from_read(r, decode_opts, &mut sink).map_err(Into::into)
         });
 
-        let rx = if opts.enable_voice_activity_detection {
-            // Wrap the decoder receiver so the main loop stays unchanged when VAD is enabled.
-            // `VadStreamReceiver` is responsible for buffering and flushing VAD state.
-            let vad = vad.ok_or_else(|| {
-                crate::Error::invalid_input("VAD is enabled, but VAD failed to initialize")
-            })?;
-            let vad_rx = VadStreamReceiver::new(rx, vad, emit_frames);
-            SamplesRx::Vad(vad_rx)
-        } else {
-            SamplesRx::Plain(rx)
-        };
-
+        // VAD filtering is now handled inside the backend stream when enabled,
+        // so we return raw decoded samples without VAD wrapping.
         Ok((rx, decode_handle))
     }
 
@@ -292,6 +247,8 @@ mod tests {
             language: None,
             output_type,
             incremental_min_window_seconds: 1,
+            emit_single_segments: false,
+            vad_policy: None,
         }
     }
 
@@ -311,27 +268,6 @@ mod tests {
         let close_err = anyhow::anyhow!("close failed");
         let err = merge_run_and_close(Ok(()), Err(close_err.into())).unwrap_err();
         assert!(err.to_string().contains("close failed"));
-    }
-
-    #[test]
-    fn get_vad_returns_none_when_disabled() -> anyhow::Result<()> {
-        let scribble = Scribble::with_backend(DummyBackend);
-        let opts = default_opts(OutputType::Json);
-        let vad = Scribble::<DummyBackend>::get_vad(scribble.vad_model_path.as_deref(), &opts)?;
-        assert!(vad.is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn get_vad_errors_when_enabled_but_missing_path() {
-        let scribble = Scribble::with_backend(DummyBackend);
-        let mut opts = default_opts(OutputType::Json);
-        opts.enable_voice_activity_detection = true;
-
-        let err =
-            Scribble::<DummyBackend>::get_vad(scribble.vad_model_path.as_deref(), &opts).err();
-        let err = err.expect("expected get_vad() to error");
-        assert!(err.to_string().contains("no VAD model path"));
     }
 
     struct NoopEncoder;
@@ -382,18 +318,6 @@ mod tests {
         ) -> Result<Self::Stream<'a>> {
             Ok(FinishErrStream)
         }
-    }
-
-    #[test]
-    fn get_samples_rx_errors_when_vad_enabled_but_missing_processor() {
-        let mut opts = default_opts(OutputType::Json);
-        opts.enable_voice_activity_detection = true;
-
-        let input = std::io::Cursor::new(Vec::<u8>::new());
-        let err = Scribble::<DummyBackend>::get_samples_rx(input, &opts, None)
-            .err()
-            .expect("expected get_samples_rx() to error");
-        assert!(err.to_string().contains("VAD failed to initialize"));
     }
 
     #[test]
