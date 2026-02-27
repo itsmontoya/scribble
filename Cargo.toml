@@ -53,7 +53,7 @@ tokio-util = { version = "0.7", optional = true, features = ["io", "io-util"] }
 futures-util = { version = "0.3", optional = true }
 uuid = { version = "1", features = ["v4"] }
 indicatif = { version = "0.18", optional = true }
-reqwest = { version = "0.13.1", optional = true, default-features = false, features = [
+reqwest = { version = "0.13.2", optional = true, default-features = false, features = [
   "blocking",
   "rustls",
 ] }
