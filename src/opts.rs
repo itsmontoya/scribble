@@ -44,4 +44,15 @@ pub struct Opts {
     /// This only affects the streaming/incremental path (when VAD is disabled). Larger windows
     /// increase latency but can improve segmentation stability.
     pub incremental_min_window_seconds: usize,
+
+    /// Whether to emit single segments immediately in incremental mode.
+    ///
+    /// By default (`false`), the incremental transcriber waits for 2+ segments before emitting,
+    /// treating the last segment as potentially incomplete. This provides better accuracy for
+    /// long-form transcription but adds latency for short utterances.
+    ///
+    /// When `true`, single segments are emitted as soon as detected. This is useful for
+    /// voice assistants and real-time applications where low latency is more important than
+    /// waiting for sentence boundaries.
+    pub emit_single_segments: bool,
 }

@@ -9,6 +9,7 @@ use crate::backend::{Backend, BackendStream};
 use crate::decoder::SamplesSink;
 use crate::opts::Opts;
 use crate::segment_encoder::SegmentEncoder;
+use crate::vad::{VadProcessor, VadStream};
 
 mod ctx;
 mod incremental;
@@ -30,14 +31,44 @@ pub struct WhisperBackend {
 /// Streaming state for [`WhisperBackend`].
 pub struct WhisperStream<'a> {
     inner: BufferedSegmentTranscriber<'a>,
+    vad: Option<VadStream>,
 }
 
 impl BackendStream for WhisperStream<'_> {
     fn on_samples(&mut self, samples_16k_mono: &[f32]) -> Result<bool> {
-        self.inner.on_samples(samples_16k_mono).map_err(Into::into)
+        if let Some(ref mut vad) = self.vad {
+            // Push samples through VAD
+            vad.push(samples_16k_mono).map_err(crate::Error::from)?;
+
+            // Drain all available VAD-filtered output to the transcriber
+            while let Some(chunk) = vad.peek_remainder() {
+                if chunk.is_empty() {
+                    break;
+                }
+                let chunk = chunk.to_vec();
+                vad.consume_remainder();
+                self.inner.on_samples(&chunk).map_err(crate::Error::from)?;
+            }
+            Ok(true)
+        } else {
+            self.inner.on_samples(samples_16k_mono).map_err(Into::into)
+        }
     }
 
     fn finish(&mut self) -> Result<()> {
+        if let Some(ref mut vad) = self.vad {
+            // Flush any remaining VAD-buffered audio
+            vad.flush().map_err(crate::Error::from)?;
+
+            // Drain final VAD output to transcriber
+            if let Some(chunk) = vad.peek_remainder() {
+                if !chunk.is_empty() {
+                    let chunk = chunk.to_vec();
+                    vad.consume_remainder();
+                    self.inner.on_samples(&chunk).map_err(crate::Error::from)?;
+                }
+            }
+        }
         self.inner.finish().map_err(Into::into)
     }
 }
@@ -239,10 +270,16 @@ impl WhisperBackend {
     ) -> AnyResult<WhisperStream<'a>> {
         let ctx = self.selected_context(opts)?;
 
-        // VAD workflow is temporarily disabled while the streaming-focused version is reworked.
-        let _ = opts.enable_voice_activity_detection;
+        let vad = if opts.enable_voice_activity_detection {
+            let vad_processor = VadProcessor::new(&self.vad_model_path)?;
+            Some(VadStream::new(vad_processor))
+        } else {
+            None
+        };
+
         Ok(WhisperStream {
             inner: BufferedSegmentTranscriber::new(ctx, opts, encoder),
+            vad,
         })
     }
 }
