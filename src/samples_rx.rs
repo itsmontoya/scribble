@@ -8,6 +8,11 @@
 //! When VAD is enabled, keep the same control flow, just with a different source of samples.
 //! `SamplesRx` provides a receiver-like shape without introducing trait objects or implicit
 //! behavior.
+//!
+//! Note: With VAD now handled inside the backend stream, this module is currently unused
+//! but kept for potential future use cases.
+
+#![allow(dead_code)]
 
 use std::sync::mpsc;
 
