@@ -75,3 +75,4 @@ pub use crate::output_type::OutputType;
 pub use crate::scribble::Scribble;
 pub use crate::segment_encoder::SegmentEncoder;
 pub use crate::segments::Segment;
+pub use crate::vad::{VadPolicy, VadProcessor, VadStream, VadStreamReceiver};
