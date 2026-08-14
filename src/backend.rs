@@ -49,4 +49,13 @@ pub trait BackendStream {
 
     /// Flush and emit any final segments.
     fn finish(&mut self) -> Result<()>;
+
+    /// Returns the instant when VAD last detected speech, if any.
+    ///
+    /// Backends without VAD should return `None`. This allows callers to
+    /// measure silence duration based on actual voice activity detection,
+    /// independent of segment emission timing.
+    fn last_vad_speech_instant(&self) -> Option<std::time::Instant> {
+        None
+    }
 }

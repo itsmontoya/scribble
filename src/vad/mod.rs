@@ -12,4 +12,4 @@ mod stream;
 mod to_speech;
 
 pub use processor::VadProcessor;
-pub use stream::VadStreamReceiver;
+pub use stream::{VadStream, VadStreamReceiver};
